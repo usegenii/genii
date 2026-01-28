@@ -1,0 +1,22 @@
+{
+	"name": "@geniigotchi/orchestrator",
+	"version": "1.0.0",
+	"description": "",
+	"main": "./dist/index.js",
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.24.0",
+	"type": "module",
+	"types": "./dist/index.d.ts",
+	"devDependencies": {
+		"typescript": "5.9.3"
+	}
+}

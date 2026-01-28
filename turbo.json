@@ -1,0 +1,19 @@
+{
+	"$schema": "https://turbo.build/schema.json",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": ["dist/**", "src-tauri/target/**"]
+		},
+		"check": {
+			"dependsOn": ["^check"]
+		},
+		"check:fix": {
+			"dependsOn": ["^check:fix"]
+		},
+		"dev": {
+			"persistent": true,
+			"cache": false
+		}
+	}
+}
