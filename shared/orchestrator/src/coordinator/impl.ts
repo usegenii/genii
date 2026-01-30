@@ -2,12 +2,12 @@
  * Coordinator implementation.
  */
 
-import type { AgentAdapter } from '../adapters/types.js';
-import { TypedEventEmitter } from '../events/emitter.js';
-import type { CoordinatorEvent } from '../events/types.js';
-import { createGuidanceContext } from '../guidance/context.js';
-import { type AgentHandleImpl, createAgentHandle } from '../handle/impl.js';
-import type { AgentHandle } from '../handle/types.js';
+import type { AgentAdapter } from '../adapters/types';
+import { TypedEventEmitter } from '../events/emitter';
+import type { CoordinatorEvent } from '../events/types';
+import { createGuidanceContext } from '../guidance/context';
+import { type AgentHandleImpl, createAgentHandle } from '../handle/impl';
+import type { AgentHandle } from '../handle/types';
 import type {
 	AgentFilter,
 	AgentSessionId,
@@ -15,8 +15,8 @@ import type {
 	CoordinatorStatus,
 	Disposable,
 	ShutdownOptions,
-} from '../types/core.js';
-import type { Coordinator, CoordinatorConfig } from './types.js';
+} from '../types/core';
+import type { Coordinator, CoordinatorConfig } from './types';
 
 /**
  * Tracked agent entry with handle and adapter.

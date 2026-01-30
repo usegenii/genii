@@ -2,7 +2,7 @@
  * Type-safe event emitter utility.
  */
 
-import type { Disposable } from '../types/core.js';
+import type { Disposable } from '../types/core';
 
 /**
  * Event handler function type.

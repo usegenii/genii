@@ -4,7 +4,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { SkillBundle, SkillInfo, TaskDocument, TaskInfo } from './types.js';
+import type { SkillBundle, SkillInfo, TaskDocument, TaskInfo } from './types';
 
 /**
  * Parse frontmatter from markdown content.

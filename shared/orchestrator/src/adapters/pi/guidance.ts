@@ -4,11 +4,11 @@
 
 import type { AgentToolResult, AgentTool as PiAgentTool } from '@mariozechner/pi-agent-core';
 import type { Static, TSchema } from '@sinclair/typebox';
-import type { GuidanceContext } from '../../guidance/types.js';
-import type { ToolExecutionState } from '../../snapshot/types.js';
-import { createStepContext, type StepContextImpl } from '../../tools/step-context.js';
-import { isSuspensionError } from '../../tools/suspension.js';
-import type { StepResumeData, SuspensionRequest, Tool, ToolContext, ToolResult } from '../../tools/types.js';
+import type { GuidanceContext } from '../../guidance/types';
+import type { ToolExecutionState } from '../../snapshot/types';
+import { createStepContext, type StepContextImpl } from '../../tools/step-context';
+import { isSuspensionError } from '../../tools/suspension';
+import type { StepResumeData, SuspensionRequest, Tool, ToolContext, ToolResult } from '../../tools/types';
 
 /**
  * Build the system prompt from guidance context.

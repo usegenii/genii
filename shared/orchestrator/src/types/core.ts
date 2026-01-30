@@ -2,7 +2,7 @@
  * Core types for the orchestrator system.
  */
 
-import type { ToolRegistryInterface } from '../tools/types.js';
+import type { ToolRegistryInterface } from '../tools/types';
 
 /**
  * Branded type for agent session IDs.

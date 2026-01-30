@@ -6,21 +6,21 @@ import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import { Agent } from '@mariozechner/pi-agent-core';
 import type { Api, Model } from '@mariozechner/pi-ai';
 import { getModels, streamSimple } from '@mariozechner/pi-ai';
-import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types.js';
-import type { AgentCheckpoint, ToolExecutionState } from '../../snapshot/types.js';
-import { CHECKPOINT_VERSION } from '../../snapshot/types.js';
-import { isSuspensionError } from '../../tools/suspension.js';
-import type { SuspensionRequest } from '../../tools/types.js';
-import type { AgentInput, AgentSessionId } from '../../types/core.js';
-import { generateAgentSessionId } from '../../types/core.js';
-import type { AdapterCreateConfig, AgentInstance, AgentInstanceStatus } from '../types.js';
-import { mapPiEvent } from './events.js';
+import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
+import type { AgentCheckpoint, ToolExecutionState } from '../../snapshot/types';
+import { CHECKPOINT_VERSION } from '../../snapshot/types';
+import { isSuspensionError } from '../../tools/suspension';
+import type { SuspensionRequest } from '../../tools/types';
+import type { AgentInput, AgentSessionId } from '../../types/core';
+import { generateAgentSessionId } from '../../types/core';
+import type { AdapterCreateConfig, AgentInstance, AgentInstanceStatus } from '../types';
+import { mapPiEvent } from './events';
 import {
 	buildPiTools,
 	buildSystemPromptWithTask,
 	createToolExecutionTracker,
 	type ToolExecutionTracker,
-} from './guidance.js';
+} from './guidance';
 
 /**
  * Pi agent instance.

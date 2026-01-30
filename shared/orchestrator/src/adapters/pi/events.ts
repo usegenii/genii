@@ -3,7 +3,7 @@
  */
 
 import type { AgentEvent as PiAgentEvent } from '@mariozechner/pi-agent-core';
-import type { AgentEvent } from '../../events/types.js';
+import type { AgentEvent } from '../../events/types';
 
 /**
  * Map a Pi agent event to our AgentEvent type.

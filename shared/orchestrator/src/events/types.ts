@@ -2,8 +2,8 @@
  * Event types for the orchestrator system.
  */
 
-import type { ToolProgress } from '../tools/types.js';
-import type { AgentResult, AgentSessionId, AgentStatus } from '../types/core.js';
+import type { ToolProgress } from '../tools/types';
+import type { AgentResult, AgentSessionId, AgentStatus } from '../types/core';
 
 /**
  * Information about a pending suspension request.

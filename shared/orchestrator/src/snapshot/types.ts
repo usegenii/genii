@@ -2,9 +2,9 @@
  * Snapshot system types.
  */
 
-import type { GuidanceCheckpoint, MemoryWrite } from '../guidance/types.js';
-import type { ToolExecutionState } from '../tools/types.js';
-import type { AgentSessionId, PartialAgentMetrics } from '../types/core.js';
+import type { GuidanceCheckpoint, MemoryWrite } from '../guidance/types';
+import type { ToolExecutionState } from '../tools/types';
+import type { AgentSessionId, PartialAgentMetrics } from '../types/core';
 
 // Re-export for convenience
 export type { GuidanceCheckpoint, MemoryWrite, ToolExecutionState };

@@ -2,7 +2,7 @@
  * Agent handle type definitions.
  */
 
-import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types.js';
+import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
 import type {
 	AgentInput,
 	AgentResult,
@@ -11,7 +11,7 @@ import type {
 	AgentSpawnConfig,
 	AgentStatus,
 	Disposable,
-} from '../types/core.js';
+} from '../types/core';
 
 /**
  * Handle for interacting with a running agent.

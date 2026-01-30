@@ -6,15 +6,15 @@ import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentSessionId } from '../../types/core.js';
+import type { AgentSessionId } from '../../types/core';
 import {
 	createFileSnapshotStore,
 	createInMemorySnapshotStore,
 	type FileSnapshotStore,
 	type InMemorySnapshotStore,
-} from '../store.js';
-import type { AgentCheckpoint } from '../types.js';
-import { CHECKPOINT_VERSION } from '../types.js';
+} from '../store';
+import type { AgentCheckpoint } from '../types';
+import { CHECKPOINT_VERSION } from '../types';
 
 function createMockCheckpoint(id: string): AgentCheckpoint {
 	return {

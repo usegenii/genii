@@ -2,11 +2,11 @@
  * Adapter system types.
  */
 
-import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types.js';
-import type { GuidanceContext } from '../guidance/types.js';
-import type { AgentCheckpoint } from '../snapshot/types.js';
-import type { ToolRegistryInterface } from '../tools/types.js';
-import type { AgentInput, AgentLimits, AgentSessionId } from '../types/core.js';
+import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
+import type { GuidanceContext } from '../guidance/types';
+import type { AgentCheckpoint } from '../snapshot/types';
+import type { ToolRegistryInterface } from '../tools/types';
+import type { AgentInput, AgentLimits, AgentSessionId } from '../types/core';
 
 /**
  * Adapter for creating and restoring agent instances.

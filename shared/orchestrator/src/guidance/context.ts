@@ -4,8 +4,8 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { listSkills, listTasks, loadSkillBundle, loadTaskDocument } from './loaders.js';
-import { MemorySystemImpl } from './memory.js';
+import { listSkills, listTasks, loadSkillBundle, loadTaskDocument } from './loaders';
+import { MemorySystemImpl } from './memory';
 import type {
 	GuidanceContext,
 	GuidanceContextOptions,
@@ -14,7 +14,7 @@ import type {
 	SkillInfo,
 	TaskDocument,
 	TaskInfo,
-} from './types.js';
+} from './types';
 
 /**
  * Implementation of GuidanceContext.

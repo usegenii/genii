@@ -5,7 +5,7 @@
  */
 
 import type { TSchema } from '@sinclair/typebox';
-import type { GuidanceContext } from '../guidance/types.js';
+import type { GuidanceContext } from '../guidance/types';
 
 /**
  * JSON Schema type for tool parameters.

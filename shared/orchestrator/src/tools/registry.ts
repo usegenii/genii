@@ -2,7 +2,7 @@
  * Tool registry implementation.
  */
 
-import type { Tool, ToolRegistryInterface } from './types.js';
+import type { Tool, ToolRegistryInterface } from './types';
 
 /**
  * Registry for managing tools.

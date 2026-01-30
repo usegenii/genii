@@ -2,10 +2,10 @@
  * Coordinator types.
  */
 
-import type { AgentAdapter } from '../adapters/types.js';
-import type { CoordinatorEvent } from '../events/types.js';
-import type { AgentHandle } from '../handle/types.js';
-import type { SnapshotStore } from '../snapshot/types.js';
+import type { AgentAdapter } from '../adapters/types';
+import type { CoordinatorEvent } from '../events/types';
+import type { AgentHandle } from '../handle/types';
+import type { SnapshotStore } from '../snapshot/types';
 import type {
 	AgentFilter,
 	AgentSessionId,
@@ -13,7 +13,7 @@ import type {
 	CoordinatorStatus,
 	Disposable,
 	ShutdownOptions,
-} from '../types/core.js';
+} from '../types/core';
 
 /**
  * Coordinator interface.

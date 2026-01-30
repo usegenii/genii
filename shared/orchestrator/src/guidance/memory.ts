@@ -4,8 +4,8 @@
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import type { Disposable } from '../types/core.js';
-import type { MemorySystem } from './types.js';
+import type { Disposable } from '../types/core';
+import type { MemorySystem } from './types';
 
 /**
  * File-based memory system implementation.

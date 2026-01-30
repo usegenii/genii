@@ -2,7 +2,7 @@
  * Suspension system for durable tool execution.
  */
 
-import type { SuspensionRequest } from './types.js';
+import type { SuspensionRequest } from './types';
 
 /**
  * Error thrown when a tool suspends execution.

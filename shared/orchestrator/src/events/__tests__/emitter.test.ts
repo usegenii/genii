@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { TypedEventEmitter, waitForEvent } from '../emitter.js';
+import { TypedEventEmitter, waitForEvent } from '../emitter';
 
 describe('TypedEventEmitter', () => {
 	describe('on', () => {

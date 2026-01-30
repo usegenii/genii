@@ -4,8 +4,8 @@
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentSessionId } from '../types/core.js';
-import type { AgentCheckpoint, FileSnapshotStoreOptions, SnapshotStore } from './types.js';
+import type { AgentSessionId } from '../types/core';
+import type { AgentCheckpoint, FileSnapshotStoreOptions, SnapshotStore } from './types';
 
 /**
  * File-based snapshot store.

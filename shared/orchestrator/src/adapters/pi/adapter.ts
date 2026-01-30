@@ -2,10 +2,10 @@
  * Pi adapter implementation.
  */
 
-import type { AgentCheckpoint } from '../../snapshot/types.js';
-import type { AdapterCreateConfig, AgentAdapter, AgentInstance } from '../types.js';
-import { createPiAgentInstance } from './instance.js';
-import type { PiAdapterOptions } from './types.js';
+import type { AgentCheckpoint } from '../../snapshot/types';
+import type { AdapterCreateConfig, AgentAdapter, AgentInstance } from '../types';
+import { createPiAgentInstance } from './instance';
+import type { PiAdapterOptions } from './types';
 
 /**
  * Pi adapter for creating and restoring agent instances.

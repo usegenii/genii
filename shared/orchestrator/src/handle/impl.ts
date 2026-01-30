@@ -2,10 +2,10 @@
  * Agent handle implementation.
  */
 
-import type { AgentInstance } from '../adapters/types.js';
-import { TypedEventEmitter } from '../events/emitter.js';
-import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types.js';
-import type { AgentCheckpoint } from '../snapshot/types.js';
+import type { AgentInstance } from '../adapters/types';
+import { TypedEventEmitter } from '../events/emitter';
+import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
+import type { AgentCheckpoint } from '../snapshot/types';
 import type {
 	AgentInput,
 	AgentResult,
@@ -14,8 +14,8 @@ import type {
 	AgentSpawnConfig,
 	AgentStatus,
 	Disposable,
-} from '../types/core.js';
-import type { AgentHandle } from './types.js';
+} from '../types/core';
+import type { AgentHandle } from './types';
 
 /**
  * Implementation of AgentHandle.

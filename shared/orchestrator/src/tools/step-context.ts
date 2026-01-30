@@ -2,7 +2,7 @@
  * Step context implementation for durable tool execution.
  */
 
-import { DuplicateStepError, SuspensionError } from './suspension.js';
+import { DuplicateStepError, SuspensionError } from './suspension';
 import type {
 	ApprovalRequest,
 	ApprovalResponse,
@@ -13,7 +13,7 @@ import type {
 	SuspensionRequest,
 	UserInputRequest,
 	WaitOptions,
-} from './types.js';
+} from './types';
 
 /**
  * Implementation of StepContext for durable execution.

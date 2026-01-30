@@ -4,8 +4,8 @@
 
 import { Type } from '@sinclair/typebox';
 import { describe, expect, it } from 'vitest';
-import { createToolRegistry, createToolRegistryWith } from '../registry.js';
-import type { Tool, ToolContext, ToolResult } from '../types.js';
+import { createToolRegistry, createToolRegistryWith } from '../registry';
+import type { Tool, ToolContext, ToolResult } from '../types';
 
 // Helper to create a mock tool
 function createMockTool(name: string, category?: string): Tool<unknown, string> {

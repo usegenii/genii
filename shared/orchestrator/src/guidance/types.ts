@@ -2,7 +2,7 @@
  * Guidance system types.
  */
 
-import type { Disposable } from '../types/core.js';
+import type { Disposable } from '../types/core';
 
 /**
  * Context for accessing guidance documents.

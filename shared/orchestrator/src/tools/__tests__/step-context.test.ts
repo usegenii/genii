@@ -3,9 +3,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createStepContext, StepContextImpl } from '../step-context.js';
-import { DuplicateStepError, SuspensionError } from '../suspension.js';
-import type { StepContextEvent } from '../types.js';
+import { createStepContext, StepContextImpl } from '../step-context';
+import { DuplicateStepError, SuspensionError } from '../suspension';
+import type { StepContextEvent } from '../types';
 
 describe('StepContext', () => {
 	describe('createStepContext', () => {

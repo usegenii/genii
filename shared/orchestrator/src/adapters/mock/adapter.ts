@@ -2,11 +2,11 @@
  * Mock adapter for testing.
  */
 
-import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../../events/types.js';
-import { type AgentCheckpoint, CHECKPOINT_VERSION } from '../../snapshot/types.js';
-import type { AgentSessionId } from '../../types/core.js';
-import { generateAgentSessionId } from '../../types/core.js';
-import type { AdapterCreateConfig, AgentAdapter, AgentInstance, AgentInstanceStatus } from '../types.js';
+import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../../events/types';
+import { type AgentCheckpoint, CHECKPOINT_VERSION } from '../../snapshot/types';
+import type { AgentSessionId } from '../../types/core';
+import { generateAgentSessionId } from '../../types/core';
+import type { AdapterCreateConfig, AgentAdapter, AgentInstance, AgentInstanceStatus } from '../types';
 
 /**
  * Options for the mock adapter.
