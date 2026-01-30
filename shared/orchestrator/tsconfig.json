@@ -1,5 +1,7 @@
 {
 	// Visit https://aka.ms/tsconfig to read more about this file
+	"include": ["src"],
+	"exclude": ["node_modules", "dist", "*.config.ts"],
 	"compilerOptions": {
 		// File Layout
 		"rootDir": "src",
@@ -9,11 +11,8 @@
 		// See also https://aka.ms/tsconfig/module
 		"module": "nodenext",
 		"target": "es2022",
-		"types": [],
-		// For nodejs:
-		// "lib": ["esnext"],
-		// "types": ["node"],
-		// and npm install -D @types/node
+		"lib": ["ES2022"],
+		"types": ["node"],
 
 		// Other Outputs
 		"sourceMap": true,
@@ -22,7 +21,6 @@
 
 		// Stricter Typechecking Options
 		"noUncheckedIndexedAccess": true,
-		"exactOptionalPropertyTypes": true,
 
 		// Style Options
 		// "noImplicitReturns": true,

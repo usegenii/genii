@@ -11,6 +11,9 @@
 		"check:fix": {
 			"dependsOn": ["^check:fix"]
 		},
+		"typecheck": {
+			"dependsOn": ["^typecheck"]
+		},
 		"dev": {
 			"persistent": true,
 			"cache": false

@@ -1,0 +1,14 @@
+{
+	"name": "@geniigotchi/guidance",
+	"version": "1.0.0",
+	"description": "Template guidance documents and documentation for the orchestrator system",
+	"type": "module",
+	"scripts": {
+		"check": "biome check .",
+		"check:fix": "biome check --write ."
+	},
+	"keywords": ["ai", "agents", "guidance", "templates"],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.24.0"
+}

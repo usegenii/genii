@@ -1,14 +1,16 @@
 {
 	"name": "@geniigotchi/orchestrator",
 	"version": "1.0.0",
-	"description": "",
+	"description": "Core orchestrator system for managing autonomous AI agents",
 	"main": "./dist/index.js",
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"keywords": [],
 	"author": "",
@@ -16,7 +18,14 @@
 	"packageManager": "pnpm@10.24.0",
 	"type": "module",
 	"types": "./dist/index.d.ts",
+	"dependencies": {
+		"@mariozechner/pi-agent-core": "^0.49.3",
+		"@mariozechner/pi-ai": "^0.49.3",
+		"@sinclair/typebox": "^0.34.33"
+	},
 	"devDependencies": {
-		"typescript": "5.9.3"
+		"@types/node": "^22.15.21",
+		"typescript": "5.9.3",
+		"vitest": "^3.2.2"
 	}
 }
