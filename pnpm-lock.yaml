@@ -21,6 +21,18 @@ importers:
         specifier: ^2
         version: 2.9.6
 
+  shared/comms:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.21
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.2
+        version: 3.2.4(@types/node@22.19.7)
+
   shared/config:
     dependencies:
       '@napi-rs/keyring':

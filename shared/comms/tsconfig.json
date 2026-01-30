@@ -1,0 +1,35 @@
+{
+	// Visit https://aka.ms/tsconfig to read more about this file
+	"include": ["src"],
+	"exclude": ["node_modules", "dist", "*.config.ts"],
+	"compilerOptions": {
+		// File Layout
+		"rootDir": "src",
+		"outDir": "dist",
+
+		// Environment Settings
+		"module": "esnext",
+		"target": "es2022",
+		"lib": ["ES2022"],
+		"types": ["node"],
+		"moduleResolution": "bundler",
+
+		// Other Outputs
+		"sourceMap": true,
+		"declaration": true,
+		"declarationMap": true,
+
+		// Stricter Typechecking Options
+		"noUncheckedIndexedAccess": true,
+
+		// Recommended Options
+		"strict": true,
+		"jsx": "react-jsx",
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"noUncheckedSideEffectImports": true,
+		"moduleDetection": "force",
+		"skipLibCheck": true,
+		"esModuleInterop": true
+	}
+}
