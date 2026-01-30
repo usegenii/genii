@@ -1,0 +1,28 @@
+{
+	"include": ["src"],
+	"exclude": ["node_modules", "dist", "*.config.ts"],
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "dist",
+
+		"module": "esnext",
+		"target": "es2022",
+		"lib": ["ES2022"],
+		"types": ["node"],
+		"moduleResolution": "bundler",
+
+		"sourceMap": true,
+		"declaration": true,
+		"declarationMap": true,
+
+		"noUncheckedIndexedAccess": true,
+
+		"strict": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"noUncheckedSideEffectImports": true,
+		"moduleDetection": "force",
+		"skipLibCheck": true,
+		"esModuleInterop": true
+	}
+}

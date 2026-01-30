@@ -2,7 +2,10 @@
 	"name": "@geniigotchi/config",
 	"version": "1.0.0",
 	"description": "Configuration management for geniigotchi",
-	"main": "./dist/config.js",
+	"type": "module",
+	"exports": {
+		"./*": "./src/*.ts"
+	},
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",
@@ -16,14 +19,6 @@
 	"author": "",
 	"license": "ISC",
 	"packageManager": "pnpm@10.24.0",
-	"type": "module",
-	"types": "./dist/config.d.ts",
-	"exports": {
-		"./config": {
-			"types": "./dist/config.d.ts",
-			"import": "./dist/config.js"
-		}
-	},
 	"dependencies": {
 		"@napi-rs/keyring": "^1.1.6",
 		"@sinclair/typebox": "^0.34.33",

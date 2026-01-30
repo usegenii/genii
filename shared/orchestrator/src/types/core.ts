@@ -62,16 +62,17 @@ export interface AgentLimits {
  * Configuration for spawning a new agent.
  */
 export interface AgentSpawnConfig {
-	/** Path to the guidance folder containing SOUL.md, INSTRUCTIONS.md, etc. */
-	guidancePath: string;
+	/** Path to the guidance folder containing SOUL.md, INSTRUCTIONS.md, etc.
+	 * If not specified, uses the coordinator's default guidance path. */
+	guidancePath?: string;
 	/** Optional task ID to load */
 	task?: string;
 	/** Initial input to the agent */
 	input?: AgentInput;
 	/** Execution limits */
 	limits?: AgentLimits;
-	/** Tools available to the agent */
-	tools: ToolRegistryInterface;
+	/** Tools available to the agent (optional, uses default if not provided) */
+	tools?: ToolRegistryInterface;
 	/** Tags for filtering agents */
 	tags?: string[];
 	/** Arbitrary metadata */

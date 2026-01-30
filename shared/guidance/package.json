@@ -7,7 +7,12 @@
 		"check": "biome check .",
 		"check:fix": "biome check --write ."
 	},
-	"keywords": ["ai", "agents", "guidance", "templates"],
+	"keywords": [
+		"ai",
+		"agents",
+		"guidance",
+		"templates"
+	],
 	"author": "",
 	"license": "ISC",
 	"packageManager": "pnpm@10.24.0"

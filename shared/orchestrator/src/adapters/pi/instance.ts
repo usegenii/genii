@@ -9,6 +9,7 @@ import { getModels, streamSimple } from '@mariozechner/pi-ai';
 import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
 import type { AgentCheckpoint, ToolExecutionState } from '../../snapshot/types';
 import { CHECKPOINT_VERSION } from '../../snapshot/types';
+import { createToolRegistry } from '../../tools/registry';
 import { isSuspensionError } from '../../tools/suspension';
 import type { SuspensionRequest } from '../../tools/types';
 import type { AgentInput, AgentSessionId } from '../../types/core';
@@ -64,15 +65,20 @@ export class PiAgentInstance implements AgentInstance {
 
 		if (typeof options.apiKey === 'function') {
 			this.apiKeyGetter = options.apiKey;
+		} else if (typeof options.apiKey === 'string') {
+			// Wrap string API key in an async getter for uniform handling
+			const key = options.apiKey;
+			this.apiKeyGetter = async () => key;
 		}
 
 		if (options.thinkingLevel && options.thinkingLevel !== 'off') {
 			this.thinkingLevel = options.thinkingLevel;
 		}
 
-		// Build Pi tools from our tools
+		// Build Pi tools from our tools (use empty registry if not provided)
+		const toolRegistry = config.tools ?? createToolRegistry();
 		const piTools = buildPiTools(
-			config.tools.all(),
+			toolRegistry.all(),
 			this.id,
 			config.guidance,
 			this.abortController.signal,
@@ -442,6 +448,43 @@ export class PiAgentInstance implements AgentInstance {
 }
 
 /**
+ * Map from our provider types to pi-ai API types.
+ */
+const PROVIDER_TO_API: Record<string, Api> = {
+	anthropic: 'anthropic-messages',
+	openai: 'openai-completions',
+	google: 'google-generative-ai',
+};
+
+/**
+ * Create a custom model configuration for use with custom endpoints.
+ */
+function createCustomModel(
+	modelId: string,
+	providerType: string,
+	baseUrl: string,
+	supportsReasoning: boolean,
+): Model<Api> {
+	const api = PROVIDER_TO_API[providerType];
+	if (!api) {
+		throw new Error(`Unsupported provider type "${providerType}". Supported: ${Object.keys(PROVIDER_TO_API).join(', ')}`);
+	}
+
+	return {
+		id: modelId,
+		name: modelId,
+		api,
+		provider: 'custom',
+		baseUrl,
+		reasoning: supportsReasoning,
+		input: ['text', 'image'],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 8192,
+	} as Model<Api>;
+}
+
+/**
  * Create a Pi agent instance.
  */
 export async function createPiAgentInstance(
@@ -454,12 +497,21 @@ export async function createPiAgentInstance(
 		baseUrl?: string;
 	},
 ): Promise<PiAgentInstance> {
-	// Get model
-	const models = getModels(options.provider);
-	const model = models.find((m) => m.id === options.model || m.name === options.model);
+	let model: Model<Api>;
 
-	if (!model) {
-		throw new Error(`Model "${options.model}" not found for provider "${options.provider}"`);
+	if (options.baseUrl) {
+		// Custom endpoint - create a custom model configuration
+		const supportsReasoning = options.thinkingLevel !== undefined && options.thinkingLevel !== 'off';
+		model = createCustomModel(options.model, options.provider, options.baseUrl, supportsReasoning);
+	} else {
+		// Standard provider - look up from known models
+		const models = getModels(options.provider);
+		const foundModel = models.find((m) => m.id === options.model || m.name === options.model);
+
+		if (!foundModel) {
+			throw new Error(`Model "${options.model}" not found for provider "${options.provider}"`);
+		}
+		model = foundModel as Model<Api>;
 	}
 
 	// Build system prompt

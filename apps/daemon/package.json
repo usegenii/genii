@@ -1,0 +1,35 @@
+{
+	"name": "@apps/daemon",
+	"version": "1.0.0",
+	"description": "Background daemon for managing AI agents and communication channels",
+	"type": "module",
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.24.0",
+	"dependencies": {
+		"@geniigotchi/orchestrator": "workspace:*",
+		"@geniigotchi/config": "workspace:*",
+		"@geniigotchi/models": "workspace:*",
+		"@geniigotchi/comms": "workspace:*",
+		"pino": "^9.0.0",
+		"pino-pretty": "^11.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "5.9.3",
+		"vitest": "^3.2.2"
+	}
+}

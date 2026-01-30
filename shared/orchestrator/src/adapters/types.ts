@@ -40,8 +40,8 @@ export interface AdapterCreateConfig {
 	input?: AgentInput | undefined;
 	/** Parent session ID if this is a child agent */
 	parentId?: AgentSessionId | undefined;
-	/** Tools available to the agent */
-	tools: ToolRegistryInterface;
+	/** Tools available to the agent (optional) */
+	tools?: ToolRegistryInterface;
 	/** Tags for filtering */
 	tags?: string[] | undefined;
 	/** Arbitrary metadata */

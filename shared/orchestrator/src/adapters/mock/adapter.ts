@@ -127,8 +127,9 @@ class MockAgentInstance implements AgentInstance {
 				const response = this.options.responses?.get(input) ?? `Mock response to: "${input}"`;
 
 				// Simulate tool call if configured
-				if (this.options.simulateToolCalls && this.config.tools.all().length > 0) {
-					const tool = this.config.tools.all()[0];
+				const tools = this.config.tools?.all() ?? [];
+				if (this.options.simulateToolCalls && tools.length > 0) {
+					const tool = tools[0];
 					if (tool) {
 						const toolCallId = `mock-tool-${this.turnCount}`;
 
