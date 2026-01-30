@@ -1,0 +1,37 @@
+{
+	"name": "@geniigotchi/config",
+	"version": "1.0.0",
+	"description": "Configuration management for geniigotchi",
+	"main": "./dist/config.js",
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.24.0",
+	"type": "module",
+	"types": "./dist/config.d.ts",
+	"exports": {
+		"./config": {
+			"types": "./dist/config.d.ts",
+			"import": "./dist/config.js"
+		}
+	},
+	"dependencies": {
+		"@napi-rs/keyring": "^1.1.6",
+		"@sinclair/typebox": "^0.34.33",
+		"smol-toml": "^1.3.1"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"typescript": "5.9.3",
+		"vitest": "^3.2.2"
+	}
+}
