@@ -146,6 +146,7 @@ export type OutboundIntent =
 	| AgentStreamingIntent
 	| AgentRespondingIntent
 	| AgentToolCallIntent
+	| AgentToolProgressIntent
 	| AgentErrorIntent;
 
 /**
@@ -186,6 +187,21 @@ export interface AgentToolCallIntent {
 	destination: DestinationWithMetadata;
 	toolName: string;
 	toolInput?: unknown;
+}
+
+/**
+ * Agent tool execution is in progress.
+ * Channel may show typing indicator or no-op.
+ */
+export interface AgentToolProgressIntent {
+	type: 'agent_tool_progress';
+	destination: DestinationWithMetadata;
+	toolName: string;
+	toolCallId: string;
+	progress?: {
+		percentage?: number;
+		message?: string;
+	};
 }
 
 /**

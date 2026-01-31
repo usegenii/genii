@@ -256,10 +256,40 @@ export function agentEventToOutboundIntent(event: AgentEvent, destination: Desti
 			return null;
 		}
 
-		// Events that don't need outbound intents
 		case 'thought':
 		case 'tool_end':
+			// These events indicate active agent work - refresh typing indicator
+			return {
+				type: 'agent_thinking',
+				destination: {
+					...destination,
+					metadata: {
+						conversationType: 'direct',
+					},
+				},
+			};
+
 		case 'tool_progress':
+			// Tool execution in progress - send dedicated progress intent
+			return {
+				type: 'agent_tool_progress',
+				destination: {
+					...destination,
+					metadata: {
+						conversationType: 'direct',
+					},
+				},
+				toolName: event.toolName,
+				toolCallId: event.toolCallId,
+				progress: event.progress
+					? {
+							percentage: event.progress.percentage,
+							message: event.progress.message,
+						}
+					: undefined,
+			};
+
+		// Events that don't need outbound intents
 		case 'suspended':
 		case 'memory_updated':
 			return null;

@@ -152,6 +152,13 @@ export class TelegramChannel implements Channel {
 					return { intentType: intent.type, success: true, timestamp };
 				}
 
+				case 'agent_tool_progress': {
+					// Tool execution in progress - refresh typing indicator
+					const { chatId } = decodeRef(intent.destination.ref);
+					await this.sendTypingIndicator(chatId);
+					return { intentType: intent.type, success: true, timestamp };
+				}
+
 				case 'agent_error': {
 					const { chatId, threadId } = decodeRef(intent.destination.ref);
 					const replyToMessageId = getReplyToMessageId(intent.destination);
