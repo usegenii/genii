@@ -3,6 +3,7 @@
  */
 
 import type { AgentAdapter } from '../adapters/types';
+import type { ContextInjectorRegistry } from '../context-injectors/registry';
 import type { CoordinatorEvent } from '../events/types';
 import type { AgentHandle } from '../handle/types';
 import type { AgentCheckpoint, SnapshotStore } from '../snapshot/types';
@@ -110,4 +111,8 @@ export interface CoordinatorConfig {
 	skillsPath?: string;
 	/** Logger for coordinator events */
 	logger?: Logger;
+	/** Context injector registry for dynamic context injection (optional) */
+	contextInjectorRegistry?: ContextInjectorRegistry;
+	/** User's timezone for context injection (e.g., 'America/New_York'). Defaults to system timezone. */
+	timezone?: string;
 }

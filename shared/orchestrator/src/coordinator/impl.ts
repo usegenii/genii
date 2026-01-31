@@ -3,6 +3,8 @@
  */
 
 import type { AgentAdapter } from '../adapters/types';
+import type { ContextInjectorRegistry } from '../context-injectors/registry';
+import type { ContextInjection } from '../context-injectors/types';
 import { TypedEventEmitter } from '../events/emitter';
 import type { CoordinatorEvent } from '../events/types';
 import { createGuidanceContext } from '../guidance/context';
@@ -11,14 +13,15 @@ import type { AgentHandle } from '../handle/types';
 import { createSkillsLoader } from '../skills/loader';
 import type { LoadedSkill } from '../skills/types';
 import type { AgentCheckpoint } from '../snapshot/types';
-import type {
-	AgentFilter,
-	AgentInput,
-	AgentSessionId,
-	AgentSpawnConfig,
-	CoordinatorStatus,
-	Disposable,
-	ShutdownOptions,
+import {
+	type AgentFilter,
+	type AgentInput,
+	type AgentSessionId,
+	type AgentSpawnConfig,
+	type CoordinatorStatus,
+	type Disposable,
+	generateAgentSessionId,
+	type ShutdownOptions,
 } from '../types/core';
 import { type Logger, noopLogger } from '../types/logger';
 import type { ContinueConfig, Coordinator, CoordinatorConfig } from './types';
@@ -40,10 +43,66 @@ export class CoordinatorImpl implements Coordinator {
 	private emitter = new TypedEventEmitter<CoordinatorEvent>();
 	private _status: CoordinatorStatus = 'stopped';
 	private logger: Logger;
+	private contextInjectorRegistry?: ContextInjectorRegistry;
+	private timezone: string;
 
 	constructor(config: CoordinatorConfig) {
 		this.config = config;
 		this.logger = config.logger ?? noopLogger;
+		this.contextInjectorRegistry = config.contextInjectorRegistry;
+		// Default to system timezone if not specified
+		this.timezone = config.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+	}
+
+	/**
+	 * Collect system context from registered injectors for new sessions.
+	 * @param sessionId - The agent session ID
+	 * @returns System context string, or undefined if no registry/context
+	 */
+	private collectSystemContext(sessionId: string): string | undefined {
+		if (!this.contextInjectorRegistry) {
+			return undefined;
+		}
+
+		const ctx = {
+			timezone: this.timezone,
+			now: new Date(),
+			sessionId,
+		};
+
+		const systemContext = this.contextInjectorRegistry.collectSystemContext(ctx);
+
+		if (systemContext) {
+			this.logger.debug({ sessionId, hasSystemContext: true }, 'Collected system context');
+		}
+
+		return systemContext;
+	}
+
+	/**
+	 * Collect resume context from registered injectors for continued sessions.
+	 * @param sessionId - The agent session ID
+	 * @returns Context injection with resumeMessages, or undefined if no registry/context
+	 */
+	private collectResumeContext(sessionId: string): ContextInjection | undefined {
+		if (!this.contextInjectorRegistry) {
+			return undefined;
+		}
+
+		const ctx = {
+			timezone: this.timezone,
+			now: new Date(),
+			sessionId,
+		};
+
+		const resumeMessages = this.contextInjectorRegistry.collectResumeContext(ctx);
+
+		if (resumeMessages && resumeMessages.length > 0) {
+			this.logger.debug({ sessionId, resumeMessageCount: resumeMessages.length }, 'Collected resume context');
+			return { resumeMessages };
+		}
+
+		return undefined;
 	}
 
 	get status(): CoordinatorStatus {
@@ -102,6 +161,13 @@ export class CoordinatorImpl implements Coordinator {
 			throw new Error(`Cannot spawn agent when coordinator is ${this._status}`);
 		}
 
+		// Generate session ID upfront for context injection
+		const sessionId = generateAgentSessionId();
+
+		// Collect system context for new spawn
+		const systemContext = this.collectSystemContext(sessionId);
+		const contextInjection: ContextInjection | undefined = systemContext ? { systemContext } : undefined;
+
 		// Create guidance context
 		const guidancePath = config.guidancePath ?? this.config.defaultGuidancePath;
 		if (!guidancePath) {
@@ -141,6 +207,7 @@ export class CoordinatorImpl implements Coordinator {
 			tags: config.tags,
 			metadata: config.metadata,
 			skills,
+			contextInjection,
 		});
 
 		// Create handle
@@ -268,6 +335,9 @@ export class CoordinatorImpl implements Coordinator {
 			throw new Error(`Checkpoint not found for session: ${sessionId}`);
 		}
 
+		// Collect resume context for continued session
+		const contextInjection = this.collectResumeContext(sessionId);
+
 		// Create guidance context from checkpoint
 		const guidancePath = checkpoint.guidance.guidancePath ?? this.config.defaultGuidancePath;
 		if (!guidancePath) {
@@ -305,6 +375,7 @@ export class CoordinatorImpl implements Coordinator {
 			tags: checkpoint.session.tags,
 			metadata: checkpoint.session.metadata,
 			skills,
+			contextInjection,
 		});
 
 		// Create handle - reusing the session ID from checkpoint

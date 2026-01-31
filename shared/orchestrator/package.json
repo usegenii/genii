@@ -22,7 +22,8 @@
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "^0.49.3",
 		"@mariozechner/pi-ai": "^0.49.3",
-		"@sinclair/typebox": "^0.34.33"
+		"@sinclair/typebox": "^0.34.33",
+		"chrono-node": "^2.9.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.21",

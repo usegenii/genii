@@ -30,6 +30,7 @@ export type LoggingPreferences = Static<typeof LoggingPreferencesSchema>;
 export const PreferencesConfigSchema = Type.Object({
 	agents: AgentPreferencesSchema,
 	logging: LoggingPreferencesSchema,
+	timezone: Type.Optional(Type.String({ description: 'User timezone (e.g., "America/New_York")' })),
 });
 
 export type PreferencesConfig = Static<typeof PreferencesConfigSchema>;

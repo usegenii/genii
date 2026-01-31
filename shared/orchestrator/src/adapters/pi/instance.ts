@@ -533,8 +533,9 @@ export async function createPiAgentInstance(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt with skills
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills);
+	// Build system prompt with skills and injected context
+	const systemContext = config.contextInjection?.systemContext;
+	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, systemContext);
 
 	return new PiAgentInstance(config, model, systemPrompt, {
 		apiKey: options.apiKey,
@@ -578,7 +579,15 @@ export async function createPiAgentInstanceFromCheckpoint(
 	options: PiAdapterOptions,
 ): Promise<PiAgentInstance> {
 	// Transform checkpoint messages back to Pi format
-	const piMessages = checkpointToPiMessages(checkpoint.messages);
+	const checkpointPiMessages = checkpointToPiMessages(checkpoint.messages);
+
+	// Append resume messages from context injection if present
+	// These go after checkpoint messages but before the new user message (which is added later)
+	let piMessages = checkpointPiMessages;
+	if (config.contextInjection?.resumeMessages && config.contextInjection.resumeMessages.length > 0) {
+		const resumePiMessages = checkpointToPiMessages(config.contextInjection.resumeMessages);
+		piMessages = [...checkpointPiMessages, ...resumePiMessages];
+	}
 
 	// Resolve the model using the adapter's API model ID
 	const model = resolveModel(
@@ -589,8 +598,9 @@ export async function createPiAgentInstanceFromCheckpoint(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt with skills
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills);
+	// Build system prompt with skills and injected context
+	const systemContext = config.contextInjection?.systemContext;
+	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, systemContext);
 
 	// Create restore options from checkpoint
 	const restoreOptions: RestoreOptions = {

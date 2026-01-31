@@ -18,6 +18,7 @@ const DEFAULT_PREFERENCES: PreferencesConfig = {
 	logging: {
 		level: 'info',
 	},
+	timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 };
 
 /**

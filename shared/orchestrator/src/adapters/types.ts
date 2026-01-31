@@ -2,6 +2,7 @@
  * Adapter system types.
  */
 
+import type { ContextInjection } from '../context-injectors/types';
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
 import type { GuidanceContext } from '../guidance/types';
 import type { LoadedSkill } from '../skills/types';
@@ -57,6 +58,8 @@ export interface AdapterCreateConfig {
 	metadata?: Record<string, unknown> | undefined;
 	/** Available skills loaded from skills directory */
 	skills?: LoadedSkill[] | undefined;
+	/** Dynamic context injections (systemContext, resumeMessages) */
+	contextInjection?: ContextInjection | undefined;
 }
 
 /**

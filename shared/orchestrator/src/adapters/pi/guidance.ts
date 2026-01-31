@@ -40,12 +40,13 @@ export function buildSystemPrompt(guidance: GuidanceContext, skills?: LoadedSkil
 }
 
 /**
- * Build system prompt with task content.
+ * Build system prompt with task content and optional injected context.
  */
 export async function buildSystemPromptWithTask(
 	guidance: GuidanceContext,
 	taskId?: string,
 	skills?: LoadedSkill[],
+	systemContext?: string,
 ): Promise<string> {
 	const parts: string[] = [];
 
@@ -73,6 +74,11 @@ export async function buildSystemPromptWithTask(
 		if (task) {
 			parts.push(`# Current Task: ${task.title}\n\n${task.content}`);
 		}
+	}
+
+	// Add injected system context
+	if (systemContext) {
+		parts.push(systemContext);
 	}
 
 	return parts.join('\n\n---\n\n');

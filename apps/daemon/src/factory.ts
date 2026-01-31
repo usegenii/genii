@@ -12,10 +12,13 @@ import { join } from 'node:path';
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
+import { DateTimeContextInjector } from '@geniigotchi/orchestrator/context-injectors/datetime/injector';
+import { ContextInjectorRegistry } from '@geniigotchi/orchestrator/context-injectors/registry';
 import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import { createFileSnapshotStore } from '@geniigotchi/orchestrator/snapshot/store';
 import type { SnapshotStore } from '@geniigotchi/orchestrator/snapshot/types';
+import { createDateTimeTool } from '@geniigotchi/orchestrator/tools/datetime/tool';
 import { createToolRegistry } from '@geniigotchi/orchestrator/tools/registry';
 import { DEFAULT_MAX_OUTPUT_LENGTH, DEFAULT_TIMEOUT_MS } from '@geniigotchi/orchestrator/tools/shell/constants';
 import { createShellTool } from '@geniigotchi/orchestrator/tools/shell/tool';
@@ -212,11 +215,20 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = createFileSnapshotStore({ directory: snapshotPath });
 
+	// Create and configure context injector registry
+	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
+	contextInjectorRegistry.register(new DateTimeContextInjector());
+
+	// Resolve timezone from preferences or system default
+	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 	const coordinator = createCoordinator({
 		defaultGuidancePath: guidancePath,
 		skillsPath,
 		snapshotStore,
 		logger,
+		contextInjectorRegistry,
+		timezone,
 	});
 
 	// Use provided channel registry or create a placeholder
@@ -237,7 +249,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		logger,
 	);
 
-	// Create tool registry with shell tool
+	// Create tool registry with shell tool and datetime tool
 	const toolRegistry = createToolRegistry({ logger });
 	const shellPrefs = options.config?.getPreferences()?.agents?.tools?.shell;
 	const shellTool = createShellTool({
@@ -246,6 +258,10 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		maxOutputLength: shellPrefs?.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH,
 	});
 	toolRegistry.register(shellTool);
+
+	// Register datetime tool
+	const dateTimeTool = createDateTimeTool({ timezone });
+	toolRegistry.register(dateTimeTool);
 
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
@@ -367,6 +383,13 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = options.snapshotStore ?? createFileSnapshotStore({ directory: snapshotPath });
 
+	// Create and configure context injector registry
+	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
+	contextInjectorRegistry.register(new DateTimeContextInjector());
+
+	// Resolve timezone from preferences or system default
+	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 	// Use provided or create coordinator with snapshot store
 	const coordinator =
 		options.coordinator ??
@@ -375,6 +398,8 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 			skillsPath,
 			snapshotStore,
 			logger,
+			contextInjectorRegistry,
+			timezone,
 		});
 	const channelRegistry = options.channelRegistry ?? createPlaceholderChannelRegistry();
 
@@ -393,7 +418,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		logger,
 	);
 
-	// Create tool registry with shell tool
+	// Create tool registry with shell tool and datetime tool
 	const toolRegistry = createToolRegistry({ logger });
 	const shellPrefs = options.config?.getPreferences()?.agents?.tools?.shell;
 	const shellTool = createShellTool({
@@ -402,6 +427,10 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		maxOutputLength: shellPrefs?.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH,
 	});
 	toolRegistry.register(shellTool);
+
+	// Register datetime tool
+	const dateTimeTool = createDateTimeTool({ timezone });
+	toolRegistry.register(dateTimeTool);
 
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
