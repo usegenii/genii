@@ -10,6 +10,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
+import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
@@ -19,6 +20,7 @@ import { ConversationManager } from './conversations/manager';
 import { createFileConversationStore } from './conversations/store';
 import { type Daemon, type DaemonConfig, DaemonImpl } from './daemon';
 import { createLogger, type Logger, type LogLevel } from './logging/logger';
+import { resolveDefaultModel } from './models/resolve';
 import { createMessageRouter, type MessageRouterConfig } from './router/router';
 import { createHandlers, type DaemonRuntimeConfig } from './rpc/handlers';
 import { createRpcServer, type RpcServer } from './rpc/server';
@@ -44,6 +46,10 @@ export interface CreateDaemonOptions {
 	guidancePath?: string;
 	/** Model factory for creating adapters */
 	modelFactory?: ModelFactory;
+	/** Channel registry with configured channels */
+	channelRegistry?: ChannelRegistry;
+	/** Loaded configuration */
+	config?: Config;
 }
 
 /**
@@ -103,6 +109,7 @@ interface CreateRpcServerDepsConfig {
 	shutdownManager: ShutdownManager;
 	logger: Logger;
 	modelFactory?: ModelFactory;
+	appConfig?: Config;
 }
 
 /**
@@ -131,6 +138,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		subscriptionManager,
 		logger: deps.logger,
 		modelFactory: deps.modelFactory,
+		appConfig: deps.appConfig,
 	};
 
 	// Create handlers
@@ -198,21 +206,29 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		snapshotStore,
 	});
 
-	// Create placeholder channel registry (channels will be implemented later)
-	const channelRegistry = createPlaceholderChannelRegistry();
+	// Use provided channel registry or create a placeholder
+	const channelRegistry = options.channelRegistry ?? createPlaceholderChannelRegistry();
 
 	// Create conversation store and manager
 	const conversationStorePath = join(dataPath, 'conversations.json');
 	const conversationStore = createFileConversationStore(conversationStorePath, logger);
 	const conversationManager = new ConversationManager(logger, conversationStore);
 
-	// Create message router
+	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
 		channelRegistry,
 		conversationManager,
-		adapterFactory: () => {
-			throw new Error('Agent adapter factory not configured');
+		adapterFactory: async (_agentId) => {
+			if (!options.modelFactory) {
+				throw new Error('ModelFactory not configured');
+			}
+			if (!options.config) {
+				throw new Error('Config not provided - cannot resolve default model');
+			}
+
+			const model = resolveDefaultModel(options.config);
+			return options.modelFactory.createAdapter(model);
 		},
 		defaultSpawnContext: {
 			guidancePath,
@@ -248,6 +264,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		shutdownManager,
 		logger,
 		modelFactory: options.modelFactory,
+		appConfig: options.config,
 	});
 
 	// Create and return daemon instance
@@ -322,13 +339,21 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const conversationStore = createFileConversationStore(conversationStorePath, logger);
 	const conversationManager = new ConversationManager(logger, conversationStore);
 
-	// Create message router
+	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
 		channelRegistry,
 		conversationManager,
-		adapterFactory: () => {
-			throw new Error('Agent adapter factory not configured');
+		adapterFactory: async (_agentId) => {
+			if (!options.modelFactory) {
+				throw new Error('ModelFactory not configured');
+			}
+			if (!options.config) {
+				throw new Error('Config not provided - cannot resolve default model');
+			}
+
+			const model = resolveDefaultModel(options.config);
+			return options.modelFactory.createAdapter(model);
 		},
 		defaultSpawnContext: {
 			guidancePath,
@@ -364,6 +389,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		shutdownManager,
 		logger,
 		modelFactory: options.modelFactory,
+		appConfig: options.config,
 	});
 
 	// Create and return daemon instance

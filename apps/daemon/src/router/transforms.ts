@@ -174,7 +174,11 @@ export function agentEventToOutboundIntent(event: AgentEvent, destination: Desti
 
 		case 'output': {
 			if (event.final) {
-				// Final output - send as agent_responding
+				// Final output marker - only send if there's actual text
+				// (The done event will contain the complete output)
+				if (!event.text) {
+					return null;
+				}
 				return {
 					type: 'agent_responding',
 					destination: {
@@ -232,13 +236,32 @@ export function agentEventToOutboundIntent(event: AgentEvent, destination: Desti
 			};
 		}
 
+		case 'done': {
+			// Send the final complete output if available
+			if (event.result.output) {
+				return {
+					type: 'agent_responding',
+					destination: {
+						...destination,
+						metadata: {
+							conversationType: 'direct',
+						},
+					},
+					content: {
+						type: 'text',
+						text: event.result.output,
+					},
+				};
+			}
+			return null;
+		}
+
 		// Events that don't need outbound intents
 		case 'thought':
 		case 'tool_end':
 		case 'tool_progress':
 		case 'suspended':
 		case 'memory_updated':
-		case 'done':
 			return null;
 
 		default: {

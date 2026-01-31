@@ -14,11 +14,23 @@ import type {
 	IntentProcessedConfirmation,
 	OutboundIntent,
 } from '../../events/types';
+import type { InboundFilter } from '../../filters/types';
+import { type Logger, noopLogger } from '../../logging/types';
 import type { ChannelId, ChannelStatus, Disposable } from '../../types/core';
 import { generateChannelId } from '../../types/core';
 import { decodeRef, mapUpdate } from './mappers';
 import { TelegramTransport } from './transport';
-import type { TelegramConfig, TelegramFile } from './types';
+import type { TelegramConfig, TelegramFile, TelegramUpdate } from './types';
+
+/**
+ * Extract the reply-to message ID from destination metadata.
+ * This is Telegram-specific - message ID is stored in platformData for replies.
+ */
+function getReplyToMessageId(destination: {
+	metadata?: { platformData?: { replyToMessageId?: number } };
+}): number | undefined {
+	return destination.metadata?.platformData?.replyToMessageId;
+}
 
 /**
  * Parameters for sending a message via Telegram API.
@@ -32,6 +44,13 @@ interface SendMessageParams {
 }
 
 /**
+ * Default filter that allows all updates.
+ */
+const ALLOW_ALL_FILTER: InboundFilter<TelegramUpdate> = {
+	shouldProcess: () => true,
+};
+
+/**
  * TelegramChannel implements the Channel interface for Telegram.
  */
 export class TelegramChannel implements Channel {
@@ -43,13 +62,19 @@ export class TelegramChannel implements Channel {
 	private readonly _inboundEmitter: TypedEventEmitter<InboundEvent>;
 	private readonly _lifecycleEmitter: TypedEventEmitter<ChannelLifecycleEvent>;
 	private readonly _config: TelegramConfig;
+	private readonly _filter: InboundFilter<TelegramUpdate>;
+	private readonly _logger: Logger;
+	private readonly _lastTypingAction = new Map<number, number>();
+	private static readonly TYPING_DEBOUNCE_MS = 4000;
 
-	constructor(config: TelegramConfig, id?: ChannelId) {
+	constructor(config: TelegramConfig, id?: ChannelId, filter?: InboundFilter<TelegramUpdate>, logger?: Logger) {
 		this.id = id ?? generateChannelId();
 		this._config = config;
 		this._transport = new TelegramTransport(config);
 		this._inboundEmitter = new TypedEventEmitter<InboundEvent>();
 		this._lifecycleEmitter = new TypedEventEmitter<ChannelLifecycleEvent>();
+		this._filter = filter ?? ALLOW_ALL_FILTER;
+		this._logger = logger?.child({ component: 'TelegramChannel', channelId: this.id }) ?? noopLogger;
 	}
 
 	/**
@@ -64,28 +89,32 @@ export class TelegramChannel implements Channel {
 	 */
 	async process(intent: OutboundIntent): Promise<IntentProcessedConfirmation> {
 		const timestamp = Date.now();
+		this._logger.debug({ intentType: intent.type }, 'Processing outbound intent');
 
 		try {
 			switch (intent.type) {
 				case 'agent_thinking': {
 					const { chatId } = decodeRef(intent.destination.ref);
-					await this.sendChatAction(chatId, 'typing');
+					await this.sendTypingIndicator(chatId);
 					return { intentType: intent.type, success: true, timestamp };
 				}
 
 				case 'agent_streaming': {
 					// Refresh typing indicator (Telegram typing expires after 5s)
 					const { chatId } = decodeRef(intent.destination.ref);
-					await this.sendChatAction(chatId, 'typing');
+					await this.sendTypingIndicator(chatId);
 					return { intentType: intent.type, success: true, timestamp };
 				}
 
 				case 'agent_responding': {
-					const { chatId, threadId, messageId } = decodeRef(intent.destination.ref);
+					const { chatId, threadId } = decodeRef(intent.destination.ref);
+					const replyToMessageId = getReplyToMessageId(intent.destination);
 
 					// Check if this is media content
 					if (intent.content.type === 'media') {
-						await this.sendMedia(chatId, intent.content, threadId, messageId);
+						this._logger.debug({ chatId, mediaType: intent.content.mediaType }, 'Sending media message');
+						await this.sendMedia(chatId, intent.content, threadId, replyToMessageId);
+						this._logger.info({ chatId }, 'Sent media message');
 						return { intentType: intent.type, success: true, timestamp };
 					}
 
@@ -101,27 +130,30 @@ export class TelegramChannel implements Channel {
 						params.message_thread_id = threadId;
 					}
 
-					if (messageId !== undefined) {
-						params.reply_to_message_id = messageId;
+					if (replyToMessageId !== undefined) {
+						params.reply_to_message_id = replyToMessageId;
 					}
 
 					if (parseMode) {
 						params.parse_mode = parseMode;
 					}
 
+					this._logger.debug({ chatId, textLength: text.length }, 'Sending text message');
 					await this.sendMessage(params);
+					this._logger.info({ chatId }, 'Sent text message');
 					return { intentType: intent.type, success: true, timestamp };
 				}
 
 				case 'agent_tool_call': {
 					// Just send typing indicator
 					const { chatId } = decodeRef(intent.destination.ref);
-					await this.sendChatAction(chatId, 'typing');
+					await this.sendTypingIndicator(chatId);
 					return { intentType: intent.type, success: true, timestamp };
 				}
 
 				case 'agent_error': {
-					const { chatId, threadId, messageId } = decodeRef(intent.destination.ref);
+					const { chatId, threadId } = decodeRef(intent.destination.ref);
+					const replyToMessageId = getReplyToMessageId(intent.destination);
 
 					// Format error message with warning emoji
 					const errorText = `\u26A0\uFE0F Error: ${intent.error}`;
@@ -135,10 +167,11 @@ export class TelegramChannel implements Channel {
 						params.message_thread_id = threadId;
 					}
 
-					if (messageId !== undefined) {
-						params.reply_to_message_id = messageId;
+					if (replyToMessageId !== undefined) {
+						params.reply_to_message_id = replyToMessageId;
 					}
 
+					this._logger.warn({ chatId, error: intent.error }, 'Sending error message');
 					await this.sendMessage(params);
 					return { intentType: intent.type, success: true, timestamp };
 				}
@@ -155,10 +188,12 @@ export class TelegramChannel implements Channel {
 				}
 			}
 		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			this._logger.error({ error: errorMsg, intentType: intent.type }, 'Failed to process intent');
 			return {
 				intentType: intent.type,
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMsg,
 				timestamp,
 			};
 		}
@@ -218,17 +253,26 @@ export class TelegramChannel implements Channel {
 	 * Connect to Telegram and start receiving updates.
 	 */
 	async connect(): Promise<void> {
+		this._logger.info('Connecting to Telegram');
 		this._status = 'connecting';
 
 		// Start transport with callbacks
 		this._transport.start(
 			(update) => {
+				// Apply filter before processing
+				if (!this._filter.shouldProcess(update)) {
+					this._logger.debug({ updateId: update.update_id }, 'Update filtered out');
+					return;
+				}
+
 				const event = mapUpdate(update, this.id);
 				if (event) {
+					this._logger.debug({ eventType: event.type, updateId: update.update_id }, 'Received inbound event');
 					this._inboundEmitter.emit(event);
 				}
 			},
 			(error) => {
+				this._logger.error({ error: error.message }, 'Transport error');
 				const errorEvent: ChannelErrorEvent = {
 					type: 'channel_error',
 					channelId: this.id,
@@ -242,6 +286,7 @@ export class TelegramChannel implements Channel {
 		);
 
 		this._status = 'connected';
+		this._logger.info('Connected to Telegram');
 
 		const connectedEvent: ChannelConnectedEvent = {
 			type: 'channel_connected',
@@ -255,6 +300,7 @@ export class TelegramChannel implements Channel {
 	 * Disconnect from Telegram and stop receiving updates.
 	 */
 	async disconnect(): Promise<void> {
+		this._logger.info('Disconnecting from Telegram');
 		this._transport.stop();
 		this._status = 'disconnected';
 
@@ -268,6 +314,7 @@ export class TelegramChannel implements Channel {
 			timestamp: Date.now(),
 		};
 		this._lifecycleEmitter.emit(disconnectedEvent);
+		this._logger.info('Disconnected from Telegram');
 	}
 
 	/**
@@ -275,6 +322,21 @@ export class TelegramChannel implements Channel {
 	 */
 	private async sendChatAction(chatId: number, action: string): Promise<void> {
 		await this._transport.callApi('sendChatAction', { chat_id: chatId, action });
+	}
+
+	/**
+	 * Send typing indicator with debouncing to avoid rate limits.
+	 */
+	private async sendTypingIndicator(chatId: number): Promise<void> {
+		const now = Date.now();
+		const lastSent = this._lastTypingAction.get(chatId) ?? 0;
+
+		if (now - lastSent < TelegramChannel.TYPING_DEBOUNCE_MS) {
+			return;
+		}
+
+		this._lastTypingAction.set(chatId, now);
+		await this.sendChatAction(chatId, 'typing');
 	}
 
 	/**

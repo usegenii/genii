@@ -3,7 +3,7 @@
  */
 
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../../events/types';
-import type { AgentCheckpoint } from '../../snapshot/types';
+import type { AgentCheckpoint, InstanceCheckpoint } from '../../snapshot/types';
 import type { AgentSessionId } from '../../types/core';
 import { generateAgentSessionId } from '../../types/core';
 import type { AdapterCreateConfig, AgentAdapter, AgentInstance, AgentInstanceStatus } from '../types';
@@ -27,6 +27,8 @@ export interface MockAdapterOptions {
  */
 export class MockAgentAdapter implements AgentAdapter {
 	readonly name = 'mock';
+	readonly modelProvider = 'mock';
+	readonly modelName = 'mock-model';
 	private options: MockAdapterOptions;
 
 	constructor(options: MockAdapterOptions = {}) {
@@ -240,7 +242,7 @@ class MockAgentInstance implements AgentInstance {
 		this._status = 'aborted';
 	}
 
-	async checkpoint(): Promise<AgentCheckpoint> {
+	async checkpoint(): Promise<InstanceCheckpoint> {
 		return {
 			timestamp: Date.now(),
 			adapterName: 'mock',
@@ -262,10 +264,7 @@ class MockAgentInstance implements AgentInstance {
 				systemState: {},
 			},
 			messages: [],
-			adapterConfig: {
-				provider: 'mock',
-				model: 'mock-model',
-			},
+			adapterConfig: {},
 			toolExecutions: [],
 		};
 	}

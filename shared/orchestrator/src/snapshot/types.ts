@@ -36,19 +36,28 @@ export type CheckpointContent =
 	| { type: 'tool_use'; id: string; name: string; input: unknown };
 
 /**
- * Adapter-specific configuration stored in checkpoints.
+ * Adapter-specific configuration returned by instance checkpoint.
+ * Does not include provider/model as these are injected by the coordinator.
  */
-export interface CheckpointAdapterConfig {
-	provider: string;
-	model: string;
+export interface InstanceAdapterConfig {
 	thinkingLevel?: string;
 	[key: string]: unknown;
 }
 
 /**
- * Complete checkpoint of an agent's state.
+ * Adapter-specific configuration stored in checkpoints.
+ * Includes provider/model which are injected by the coordinator.
  */
-export interface AgentCheckpoint {
+export interface CheckpointAdapterConfig extends InstanceAdapterConfig {
+	provider: string;
+	model: string;
+}
+
+/**
+ * Checkpoint returned by an agent instance.
+ * Does not include provider/model in adapterConfig - these are injected by the coordinator.
+ */
+export interface InstanceCheckpoint {
 	/** When the checkpoint was taken */
 	timestamp: number;
 	/** Name of the adapter that created this agent */
@@ -59,10 +68,19 @@ export interface AgentCheckpoint {
 	guidance: GuidanceCheckpoint;
 	/** Common message format - all adapters transform to/from this */
 	messages: CheckpointMessage[];
-	/** Adapter-specific state (model config, thinking level, etc.) */
-	adapterConfig: CheckpointAdapterConfig;
+	/** Adapter-specific state (without provider/model) */
+	adapterConfig: InstanceAdapterConfig;
 	/** State of tool executions */
 	toolExecutions: ToolExecutionState[];
+}
+
+/**
+ * Complete checkpoint of an agent's state.
+ * Includes provider/model injected by the coordinator.
+ */
+export interface AgentCheckpoint extends Omit<InstanceCheckpoint, 'adapterConfig'> {
+	/** Adapter-specific state (with provider/model) */
+	adapterConfig: CheckpointAdapterConfig;
 }
 
 /**

@@ -1,3 +1,6 @@
+import type { Destination } from '@geniigotchi/comms/destination/types';
+import type { ChannelId } from '@geniigotchi/comms/types/core';
+import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../logging/logger';
 import { ConversationManager } from '../manager';
@@ -18,10 +21,24 @@ function createMockLogger(): Logger {
 }
 
 /**
- * Create a test destination.
+ * Create a test destination with proper branded types.
  */
-function createDestination(channelId: string, ref: string) {
-	return { channelId, ref } as { channelId: string; ref: string };
+function createDestination(channelId: string, ref: string): Destination {
+	return { channelId: channelId as ChannelId, ref };
+}
+
+/**
+ * Create a test agent ID with proper branded type.
+ */
+function createAgentId(id: string): AgentSessionId {
+	return id as AgentSessionId;
+}
+
+/**
+ * Create a channel ID with proper branded type.
+ */
+function createChannelId(id: string): ChannelId {
+	return id as ChannelId;
 }
 
 describe('ConversationManager', () => {
@@ -69,7 +86,7 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
-			const agentId = 'agent-1';
+			const agentId = createAgentId('agent-1');
 
 			manager.bind(destination, agentId);
 
@@ -81,7 +98,7 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
-			const agentId = 'agent-1';
+			const agentId = createAgentId('agent-1');
 
 			manager.bind(destination, agentId);
 
@@ -101,7 +118,7 @@ describe('ConversationManager', () => {
 			vi.useFakeTimers();
 			vi.advanceTimersByTime(100);
 
-			manager.bind(destination, 'agent-1');
+			manager.bind(destination, createAgentId('agent-1'));
 
 			expect(binding.lastActivityAt.getTime()).toBeGreaterThan(originalLastActivity.getTime());
 			vi.useRealTimers();
@@ -112,13 +129,13 @@ describe('ConversationManager', () => {
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
 
-			manager.bind(destination, 'agent-1');
-			manager.bind(destination, 'agent-2');
+			manager.bind(destination, createAgentId('agent-1'));
+			manager.bind(destination, createAgentId('agent-2'));
 
 			// Old agent should no longer be mapped
-			expect(manager.getByAgent('agent-1')).toBeUndefined();
+			expect(manager.getByAgent(createAgentId('agent-1'))).toBeUndefined();
 			// New agent should be mapped
-			expect(manager.getByAgent('agent-2')).toBeDefined();
+			expect(manager.getByAgent(createAgentId('agent-2'))).toBeDefined();
 		});
 	});
 
@@ -128,7 +145,7 @@ describe('ConversationManager', () => {
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
 
-			manager.bind(destination, 'agent-1');
+			manager.bind(destination, createAgentId('agent-1'));
 			manager.unbind(destination);
 
 			const binding = manager.getByDestination(destination);
@@ -140,7 +157,7 @@ describe('ConversationManager', () => {
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
 
-			manager.bind(destination, 'agent-1');
+			manager.bind(destination, createAgentId('agent-1'));
 			manager.unbind(destination);
 
 			expect(manager.totalCount).toBe(1);
@@ -193,19 +210,20 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 			const destination = createDestination('channel-1', 'user-123');
+			const agentId = createAgentId('agent-1');
 
-			manager.bind(destination, 'agent-1');
+			manager.bind(destination, agentId);
 
-			const binding = manager.getByAgent('agent-1');
+			const binding = manager.getByAgent(agentId);
 			expect(binding).toBeDefined();
-			expect(binding?.agentId).toBe('agent-1');
+			expect(binding?.agentId).toBe(agentId);
 		});
 
 		it('should return undefined for unknown agent', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			const binding = manager.getByAgent('unknown-agent');
+			const binding = manager.getByAgent(createAgentId('unknown-agent'));
 			expect(binding).toBeUndefined();
 		});
 	});
@@ -231,7 +249,7 @@ describe('ConversationManager', () => {
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
 			manager.getOrCreate(createDestination('channel-2', 'user-3'));
 
-			const bindings = manager.list({ channelId: 'channel-1' });
+			const bindings = manager.list({ channelId: createChannelId('channel-1') });
 			expect(bindings).toHaveLength(2);
 			expect(bindings.every((b) => b.destination.channelId === 'channel-1')).toBe(true);
 		});
@@ -240,9 +258,9 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
-			manager.bind(createDestination('channel-1', 'user-3'), 'agent-2');
+			manager.bind(createDestination('channel-1', 'user-3'), createAgentId('agent-2'));
 
 			const bindings = manager.list({ hasAgent: true });
 			expect(bindings).toHaveLength(2);
@@ -253,7 +271,7 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
 			manager.getOrCreate(createDestination('channel-1', 'user-3'));
 
@@ -265,15 +283,16 @@ describe('ConversationManager', () => {
 		it('should combine filters', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
+			const agentId1 = createAgentId('agent-1');
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), agentId1);
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
-			manager.bind(createDestination('channel-2', 'user-3'), 'agent-2');
+			manager.bind(createDestination('channel-2', 'user-3'), createAgentId('agent-2'));
 
-			const bindings = manager.list({ channelId: 'channel-1', hasAgent: true });
+			const bindings = manager.list({ channelId: createChannelId('channel-1'), hasAgent: true });
 			expect(bindings).toHaveLength(1);
 			expect(bindings[0]?.destination.channelId).toBe('channel-1');
-			expect(bindings[0]?.agentId).toBe('agent-1');
+			expect(bindings[0]?.agentId).toBe(agentId1);
 		});
 	});
 
@@ -282,9 +301,9 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
-			manager.bind(createDestination('channel-2', 'user-3'), 'agent-2');
+			manager.bind(createDestination('channel-2', 'user-3'), createAgentId('agent-2'));
 
 			const snapshot = manager.snapshot();
 			expect(snapshot).toHaveLength(3);
@@ -308,7 +327,7 @@ describe('ConversationManager', () => {
 			const bindings: ConversationBinding[] = [
 				{
 					destination: createDestination('channel-1', 'user-1'),
-					agentId: 'agent-1',
+					agentId: createAgentId('agent-1'),
 					createdAt: now,
 					lastActivityAt: now,
 				},
@@ -331,7 +350,7 @@ describe('ConversationManager', () => {
 			const manager = new ConversationManager(logger);
 
 			// Add some initial bindings
-			manager.bind(createDestination('channel-1', 'user-old'), 'agent-old');
+			manager.bind(createDestination('channel-1', 'user-old'), createAgentId('agent-old'));
 			expect(manager.totalCount).toBe(1);
 
 			// Restore new bindings
@@ -339,15 +358,15 @@ describe('ConversationManager', () => {
 			manager.restore([
 				{
 					destination: createDestination('channel-1', 'user-new'),
-					agentId: 'agent-new',
+					agentId: createAgentId('agent-new'),
 					createdAt: now,
 					lastActivityAt: now,
 				},
 			]);
 
 			expect(manager.totalCount).toBe(1);
-			expect(manager.getByAgent('agent-old')).toBeUndefined();
-			expect(manager.getByAgent('agent-new')).toBeDefined();
+			expect(manager.getByAgent(createAgentId('agent-old'))).toBeUndefined();
+			expect(manager.getByAgent(createAgentId('agent-new'))).toBeDefined();
 		});
 
 		it('should properly index agent mappings when restoring', () => {
@@ -358,13 +377,13 @@ describe('ConversationManager', () => {
 			const bindings: ConversationBinding[] = [
 				{
 					destination: createDestination('channel-1', 'user-1'),
-					agentId: 'agent-1',
+					agentId: createAgentId('agent-1'),
 					createdAt: now,
 					lastActivityAt: now,
 				},
 				{
 					destination: createDestination('channel-1', 'user-2'),
-					agentId: 'agent-2',
+					agentId: createAgentId('agent-2'),
 					createdAt: now,
 					lastActivityAt: now,
 				},
@@ -372,8 +391,8 @@ describe('ConversationManager', () => {
 
 			manager.restore(bindings);
 
-			expect(manager.getByAgent('agent-1')?.destination.ref).toBe('user-1');
-			expect(manager.getByAgent('agent-2')?.destination.ref).toBe('user-2');
+			expect(manager.getByAgent(createAgentId('agent-1'))?.destination.ref).toBe('user-1');
+			expect(manager.getByAgent(createAgentId('agent-2'))?.destination.ref).toBe('user-2');
 		});
 	});
 
@@ -382,9 +401,9 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
-			manager.bind(createDestination('channel-1', 'user-3'), 'agent-2');
+			manager.bind(createDestination('channel-1', 'user-3'), createAgentId('agent-2'));
 
 			expect(manager.activeCount).toBe(2);
 		});
@@ -395,9 +414,9 @@ describe('ConversationManager', () => {
 			const logger = createMockLogger();
 			const manager = new ConversationManager(logger);
 
-			manager.bind(createDestination('channel-1', 'user-1'), 'agent-1');
+			manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
 			manager.getOrCreate(createDestination('channel-1', 'user-2'));
-			manager.bind(createDestination('channel-1', 'user-3'), 'agent-2');
+			manager.bind(createDestination('channel-1', 'user-3'), createAgentId('agent-2'));
 
 			expect(manager.totalCount).toBe(3);
 		});

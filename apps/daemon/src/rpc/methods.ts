@@ -215,8 +215,8 @@ export interface RpcMethods {
 		id: AgentSessionId;
 	};
 	'agent.spawn': {
-		/** Model identifier in format "provider/model-name" */
-		model: string;
+		/** Model identifier in format "provider/model-name". If not provided, uses default from preferences. */
+		model?: string;
 		guidancePath?: string;
 		task?: string;
 		input?: AgentInput;

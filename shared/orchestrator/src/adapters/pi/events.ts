@@ -49,13 +49,6 @@ export function mapPiEvent(
 					final: false,
 					timestamp,
 				});
-			} else if (event.type === 'text_end') {
-				events.push({
-					type: 'output',
-					text: '',
-					final: true,
-					timestamp,
-				});
 			} else if (event.type === 'thinking_delta') {
 				events.push({
 					type: 'thought',
@@ -63,6 +56,8 @@ export function mapPiEvent(
 					timestamp,
 				});
 			}
+			// Note: text_end is not emitted as an output event.
+			// The complete output is sent via the 'done' event.
 
 			return events.length > 0 ? events : null;
 		}

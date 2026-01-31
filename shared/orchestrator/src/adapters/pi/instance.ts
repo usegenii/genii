@@ -7,7 +7,7 @@ import { Agent } from '@mariozechner/pi-agent-core';
 import type { Api, Message, Model } from '@mariozechner/pi-ai';
 import { getModels, streamSimple } from '@mariozechner/pi-ai';
 import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
-import type { AgentCheckpoint, ToolExecutionState } from '../../snapshot/types';
+import type { AgentCheckpoint, InstanceCheckpoint, ToolExecutionState } from '../../snapshot/types';
 import { createToolRegistry } from '../../tools/registry';
 import { isSuspensionError } from '../../tools/suspension';
 import type { SuspensionRequest } from '../../tools/types';
@@ -319,7 +319,7 @@ export class PiAgentInstance implements AgentInstance {
 		this._status = 'aborted';
 	}
 
-	async checkpoint(): Promise<AgentCheckpoint> {
+	async checkpoint(): Promise<InstanceCheckpoint> {
 		const messages = this.agent.state.messages as Message[];
 
 		return {
@@ -344,8 +344,6 @@ export class PiAgentInstance implements AgentInstance {
 				systemState: {},
 			},
 			messages: piMessagesToCheckpoint(messages),
-			// Note: adapterConfig.provider and adapterConfig.model are injected by the coordinator
-			// from the adapter's modelProvider and modelName properties
 			adapterConfig: {
 				thinkingLevel: this.thinkingLevel,
 			},

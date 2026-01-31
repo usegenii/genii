@@ -8,10 +8,12 @@
  */
 
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
+import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
+import { resolveDefaultModel } from '../models/resolve';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
 import type { TransportConnection } from '../transport/types';
 import type {
@@ -63,6 +65,8 @@ export interface RpcHandlerContext {
 	logger: Logger;
 	/** Model factory for creating adapters (optional for backward compat) */
 	modelFactory?: ModelFactory;
+	/** Application config for preferences and model resolution */
+	appConfig?: Config;
 }
 
 /**
@@ -260,16 +264,27 @@ async function handleAgentSpawn(
 	params: RpcMethods['agent.spawn'],
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['agent.spawn']> {
-	const { coordinator, modelFactory, logger } = context;
+	const { coordinator, modelFactory, appConfig, logger } = context;
 
 	if (!modelFactory) {
 		throw new Error('Model factory not configured - cannot spawn agents');
 	}
 
-	logger.info({ model: params.model, guidancePath: params.guidancePath, tags: params.tags }, 'Agent spawn requested');
+	// Resolve model: use explicit or fall back to default from preferences
+	let model: string;
+	if (params.model) {
+		model = params.model;
+	} else {
+		if (!appConfig) {
+			throw new Error('No model specified and app config not available for default resolution');
+		}
+		model = resolveDefaultModel(appConfig);
+	}
+
+	logger.info({ model, guidancePath: params.guidancePath, tags: params.tags }, 'Agent spawn requested');
 
 	// Create adapter via model factory with optional thinking level override
-	const adapter = await modelFactory.createAdapter(params.model, {
+	const adapter = await modelFactory.createAdapter(model, {
 		thinkingLevel: params.thinkingLevel,
 	});
 
@@ -281,7 +296,7 @@ async function handleAgentSpawn(
 		tags: params.tags,
 	});
 
-	logger.info({ agentId: handle.id, model: params.model }, 'Agent spawned');
+	logger.info({ agentId: handle.id, model }, 'Agent spawned');
 
 	return { id: handle.id };
 }

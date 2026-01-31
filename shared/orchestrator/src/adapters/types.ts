@@ -4,7 +4,7 @@
 
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
 import type { GuidanceContext } from '../guidance/types';
-import type { AgentCheckpoint } from '../snapshot/types';
+import type { AgentCheckpoint, InstanceCheckpoint } from '../snapshot/types';
 import type { ToolRegistryInterface } from '../tools/types';
 import type { AgentInput, AgentLimits, AgentSessionId } from '../types/core';
 
@@ -95,8 +95,9 @@ export interface AgentInstance {
 
 	/**
 	 * Create a checkpoint of the current state.
+	 * Returns InstanceCheckpoint (without provider/model) - coordinator enriches to AgentCheckpoint.
 	 */
-	checkpoint(): Promise<AgentCheckpoint>;
+	checkpoint(): Promise<InstanceCheckpoint>;
 
 	/**
 	 * Get the current status.

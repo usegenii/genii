@@ -5,7 +5,7 @@
 import type { AgentInstance } from '../adapters/types';
 import { TypedEventEmitter } from '../events/emitter';
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
-import type { AgentCheckpoint } from '../snapshot/types';
+import type { InstanceCheckpoint } from '../snapshot/types';
 import type {
 	AgentInput,
 	AgentResult,
@@ -220,7 +220,7 @@ export class AgentHandleImpl implements AgentHandle {
 	/**
 	 * Get a full checkpoint of the agent state.
 	 */
-	async checkpoint(): Promise<AgentCheckpoint> {
+	async checkpoint(): Promise<InstanceCheckpoint> {
 		return this.instance.checkpoint();
 	}
 }

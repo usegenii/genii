@@ -134,11 +134,28 @@ export function buildMetadata(chat: TelegramChat, message?: TelegramMessage): Co
 }
 
 /**
+ * Create a "conversation ref" for routing - includes chat_id and thread_id only.
+ * Message ID is NOT included so all messages in the same chat/thread share the same destination.
+ */
+export function encodeConversationRef(chatId: number, threadId?: number): string {
+	const threadPart = threadId !== undefined ? String(threadId) : '';
+	return `${chatId}:${threadPart}:`;
+}
+
+/**
  * Create a Destination with encoded ref and extracted metadata from the chat.
+ * The ref uses conversation-level routing (excludes message_id).
+ * Message ID is stored in metadata.platformData for reply purposes.
  */
 export function buildDestination(message: TelegramMessage, channelId: ChannelId): DestinationWithMetadata {
-	const ref = encodeRef(message.chat.id, message.message_thread_id, message.message_id);
+	// Use conversation ref (without message_id) for routing
+	const ref = encodeConversationRef(message.chat.id, message.message_thread_id);
 	const metadata = buildMetadata(message.chat, message);
+
+	// Store message_id in platformData for reply purposes
+	if (metadata.platformData) {
+		metadata.platformData.replyToMessageId = message.message_id;
+	}
 
 	return {
 		channelId,

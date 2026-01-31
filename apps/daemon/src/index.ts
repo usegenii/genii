@@ -22,6 +22,7 @@ import { parseArgs } from 'node:util';
 import { loadConfig } from '@geniigotchi/config/config';
 import { createDefaultSecretStore } from '@geniigotchi/config/secrets/composite';
 import { createModelFactory } from '@geniigotchi/models/factory';
+import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
 import { type CreateDaemonOptions, createDaemon } from './factory';
 import { createLogger, type LogLevel } from './logging/logger';
@@ -291,10 +292,16 @@ export async function main(): Promise<void> {
 	// Create model factory
 	const modelFactory = createModelFactory({ config, secretStore });
 
+	// Initialize channels from configuration
+	logger.debug('Initializing channels');
+	const channelRegistry = await initializeChannels(config, secretStore, logger);
+
 	// Build daemon options from arguments
 	const options: CreateDaemonOptions = {
 		dataPath,
 		modelFactory,
+		channelRegistry,
+		config,
 	};
 	if (args.socketPath !== undefined) {
 		options.socketPath = args.socketPath;
