@@ -202,73 +202,11 @@ export class MessageRouter implements MessageRouterInterface {
 			return;
 		}
 
-		// Get or create conversation binding for this destination
-		const destination = event.origin;
-		const binding = this._conversationManager.getOrCreate(destination);
-
-		// If no agent is bound, spawn a new one with the initial input
-		if (binding.agentId === null) {
-			const agentId = await this._spawnAgent(channelId, {
-				message: agentInput.message,
-				context: agentInput.context,
-			});
-			this._conversationManager.bind(destination, agentId);
-			this._logger.info(
-				{ agentId, destination: `${destination.channelId}:${destination.ref}` },
-				'Spawned and bound new agent',
-			);
-			// Input was passed at spawn time, no need to send separately
-			return;
-		}
-
-		// Agent already exists - check if we can send follow-up or need to continue from checkpoint
-		const agentId = binding.agentId;
-		const agentHandle = this._coordinator.get(agentId);
-
-		const input: AgentInput = {
+		// Route to agent using shared logic
+		await this._routeToAgent(event.origin, channelId, {
 			message: agentInput.message,
 			context: agentInput.context,
-		};
-
-		// Agent handle not found - might be after a restart. Try to continue from checkpoint.
-		if (agentHandle === undefined) {
-			await this._tryRestoreFromCheckpoint(agentId, input, destination, channelId);
-			return;
-		}
-
-		// If agent is completed, continue from checkpoint to restore message history
-		if (agentHandle.status === 'completed') {
-			const adapter = this._coordinator.getAdapter(agentId);
-			if (adapter === undefined) {
-				this._logger.error({ agentId }, 'No adapter found for completed agent, cannot continue');
-				this._conversationManager.unbind(destination);
-				return;
-			}
-
-			try {
-				// Continue the session from checkpoint - this restores message history
-				const newHandle = await this._coordinator.continue(agentId, input, adapter, {
-					tools: this._toolRegistry,
-				});
-				this._logger.info(
-					{ agentId: newHandle.id, message: agentInput.message.substring(0, 50) },
-					'Continued conversation from checkpoint',
-				);
-			} catch (error) {
-				this._logger.error({ error, agentId }, 'Error continuing conversation from checkpoint');
-				// Unbind on error so next message will spawn fresh agent
-				this._conversationManager.unbind(destination);
-			}
-			return;
-		}
-
-		// Agent is still running - send follow-up input directly
-		try {
-			await agentHandle.send(input);
-			this._logger.debug({ agentId, message: agentInput.message.substring(0, 50) }, 'Sent input to agent');
-		} catch (error) {
-			this._logger.error({ error, agentId }, 'Error sending input to agent');
-		}
+		});
 	}
 
 	/**
@@ -338,12 +276,10 @@ export class MessageRouter implements MessageRouterInterface {
 				break;
 
 			case 'forward': {
-				// Forward to agent as a regular message by transforming to agent input
-				// and processing through normal flow
+				// Forward to agent as a regular message
 				this._logger.debug({ command: event.command }, 'Forwarding command to agent');
-				// Reconstruct as a message and process
 				const message = `/${event.command}${event.args ? ` ${event.args}` : ''}`;
-				await this._processMessageInput(event.origin, channelId, message);
+				await this._routeToAgent(event.origin, channelId, { message, context: {} });
 				break;
 			}
 
@@ -385,34 +321,71 @@ export class MessageRouter implements MessageRouterInterface {
 	}
 
 	/**
-	 * Process a message input through the normal agent routing flow.
+	 * Route input to an agent, handling spawning, checkpoint restoration, and message delivery.
+	 *
+	 * This is the unified routing logic for both normal messages and forwarded commands.
 	 *
 	 * @param destination - Where the message came from
 	 * @param channelId - The channel ID
-	 * @param message - The message text
+	 * @param input - The agent input to route
 	 */
-	private async _processMessageInput(destination: Destination, channelId: ChannelId, message: string): Promise<void> {
+	private async _routeToAgent(destination: Destination, channelId: ChannelId, input: AgentInput): Promise<void> {
 		// Get or create conversation binding for this destination
 		const binding = this._conversationManager.getOrCreate(destination);
 
 		// If no agent is bound, spawn a new one with the initial input
 		if (binding.agentId === null) {
-			const agentId = await this._spawnAgent(channelId, {
-				message,
-				context: {},
-			});
+			const agentId = await this._spawnAgent(channelId, input);
 			this._conversationManager.bind(destination, agentId);
 			this._logger.info(
 				{ agentId, destination: `${destination.channelId}:${destination.ref}` },
-				'Spawned and bound new agent for forwarded command',
+				'Spawned and bound new agent',
 			);
 			return;
 		}
 
-		// Agent already exists - send the message
-		const agentHandle = this._coordinator.get(binding.agentId);
-		if (agentHandle && agentHandle.status !== 'completed') {
-			await agentHandle.send({ message, context: {} });
+		// Agent already exists - check if we can send follow-up or need to continue from checkpoint
+		const agentId = binding.agentId;
+		const agentHandle = this._coordinator.get(agentId);
+
+		// Agent handle not found - might be after a restart. Try to restore from checkpoint.
+		if (agentHandle === undefined) {
+			await this._tryRestoreFromCheckpoint(agentId, input, destination, channelId);
+			return;
+		}
+
+		// If agent is completed, continue from checkpoint to restore message history
+		if (agentHandle.status === 'completed') {
+			const adapter = this._coordinator.getAdapter(agentId);
+			if (adapter === undefined) {
+				this._logger.error({ agentId }, 'No adapter found for completed agent, cannot continue');
+				this._conversationManager.unbind(destination);
+				return;
+			}
+
+			try {
+				// Continue the session from checkpoint - this restores message history
+				const newHandle = await this._coordinator.continue(agentId, input, adapter, {
+					tools: this._toolRegistry,
+				});
+				this._logger.info(
+					{ agentId: newHandle.id, message: input.message?.substring(0, 50) },
+					'Continued conversation from checkpoint',
+				);
+			} catch (error) {
+				this._logger.error({ error, agentId }, 'Error continuing conversation from checkpoint');
+				// Unbind on error so next message will spawn fresh agent
+				this._conversationManager.unbind(destination);
+			}
+			return;
+		}
+
+		// Agent is still running - send follow-up input directly
+		try {
+			await agentHandle.send(input);
+			this._logger.debug({ agentId, message: input.message?.substring(0, 50) }, 'Sent input to agent');
+		} catch (error) {
+			this._logger.error({ error, agentId }, 'Error sending input to agent');
 		}
 	}
 
