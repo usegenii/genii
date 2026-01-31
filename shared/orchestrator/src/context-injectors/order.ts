@@ -8,6 +8,8 @@
 export const INJECTOR_ORDER = {
 	/** Soul content (SOUL.md) - identity and core personality */
 	SOUL: 0,
+	/** Identity files (IDENTITY.md, HUMAN.md) - formed identity and human info */
+	IDENTITY: 50,
 	/** Instructions (INSTRUCTIONS.md) - behavioral guidelines */
 	INSTRUCTIONS: 100,
 	/** Skills section - available skill bundles */

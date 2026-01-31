@@ -13,6 +13,7 @@ import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import { DateTimeContextInjector } from '@geniigotchi/orchestrator/context-injectors/datetime/injector';
+import { IdentityContextInjector } from '@geniigotchi/orchestrator/context-injectors/identity/injector';
 import { InstructionsContextInjector } from '@geniigotchi/orchestrator/context-injectors/instructions/injector';
 import { MemoriesPathContextInjector } from '@geniigotchi/orchestrator/context-injectors/memories-path/injector';
 import { ContextInjectorRegistry } from '@geniigotchi/orchestrator/context-injectors/registry';
@@ -223,6 +224,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	// Create and configure context injector registry with all injectors
 	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
 	contextInjectorRegistry.register(new SoulContextInjector());
+	contextInjectorRegistry.register(new IdentityContextInjector());
 	contextInjectorRegistry.register(new InstructionsContextInjector());
 	contextInjectorRegistry.register(new SkillsContextInjector());
 	contextInjectorRegistry.register(new MemoriesPathContextInjector());
@@ -396,6 +398,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	// Create and configure context injector registry with all injectors
 	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
 	contextInjectorRegistry.register(new SoulContextInjector());
+	contextInjectorRegistry.register(new IdentityContextInjector());
 	contextInjectorRegistry.register(new InstructionsContextInjector());
 	contextInjectorRegistry.register(new SkillsContextInjector());
 	contextInjectorRegistry.register(new MemoriesPathContextInjector());
