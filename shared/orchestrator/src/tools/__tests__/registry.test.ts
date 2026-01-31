@@ -3,7 +3,8 @@
  */
 
 import { Type } from '@sinclair/typebox';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Logger } from '../../types/logger';
 import { createToolRegistry, createToolRegistryWith } from '../registry';
 import type { Tool, ToolContext, ToolResult } from '../types';
 
@@ -32,7 +33,7 @@ describe('ToolRegistry', () => {
 
 	describe('createToolRegistryWith', () => {
 		it('should create a registry with initial tools', () => {
-			const registry = createToolRegistryWith(createMockTool('tool1'), createMockTool('tool2'));
+			const registry = createToolRegistryWith({}, createMockTool('tool1'), createMockTool('tool2'));
 			expect(registry.all()).toHaveLength(2);
 		});
 	});
@@ -52,6 +53,23 @@ describe('ToolRegistry', () => {
 			const tool2 = createMockTool('test');
 			registry.register(tool1);
 			expect(() => registry.register(tool2)).toThrow('Tool "test" is already registered');
+		});
+
+		it('should log when registering a tool', () => {
+			const mockLogger: Logger = {
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				child: vi.fn(() => mockLogger),
+			};
+			const registry = createToolRegistry({ logger: mockLogger });
+			const tool = createMockTool('test', 'category1');
+			registry.register(tool);
+			expect(mockLogger.info).toHaveBeenCalledWith(
+				{ tool: 'test', category: 'category1' },
+				'Registered tool: test',
+			);
 		});
 	});
 

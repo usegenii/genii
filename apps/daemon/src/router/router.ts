@@ -15,27 +15,12 @@ import type { ChannelId, Disposable } from '@geniigotchi/comms/types/core';
 import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import type { AgentEvent, CoordinatorEvent } from '@geniigotchi/orchestrator/events/types';
-import type { Tool, ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
+import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
 import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@geniigotchi/orchestrator/types/core';
 import type { CommandExecutorInterface } from '../commands/executor';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { agentEventToOutboundIntent, inboundEventToAgentInput } from './transforms';
-
-/**
- * Create an empty tool registry for agents with no tools.
- */
-function createEmptyToolRegistry(): ToolRegistryInterface {
-	return {
-		register: <TInput, TOutput>(_tool: Tool<TInput, TOutput>): void => {
-			// No-op for empty registry
-		},
-		get: (_name: string): Tool<unknown, unknown> | undefined => undefined,
-		all: (): Tool<unknown, unknown>[] => [],
-		byCategory: (_category: string): Tool<unknown, unknown>[] => [],
-		extend: (registry: ToolRegistryInterface): ToolRegistryInterface => registry,
-	};
-}
 
 /**
  * Configuration for spawning new agents.
@@ -74,6 +59,8 @@ export interface MessageRouterConfig {
 	logger: Logger;
 	/** Optional command executor for handling slash commands */
 	commandExecutor?: CommandExecutorInterface;
+	/** Tool registry for agents */
+	toolRegistry?: ToolRegistryInterface;
 }
 
 /**
@@ -118,6 +105,7 @@ export class MessageRouter implements MessageRouterInterface {
 	private readonly _adapterFactory: AgentAdapterFactory;
 	private readonly _defaultSpawnContext: AgentSpawnContext;
 	private readonly _commandExecutor: CommandExecutorInterface | undefined;
+	private readonly _toolRegistry: ToolRegistryInterface | undefined;
 
 	/** Subscriptions to clean up on stop */
 	private readonly _subscriptions: Disposable[] = [];
@@ -133,6 +121,7 @@ export class MessageRouter implements MessageRouterInterface {
 		this._adapterFactory = config.adapterFactory;
 		this._defaultSpawnContext = config.defaultSpawnContext;
 		this._commandExecutor = config.commandExecutor;
+		this._toolRegistry = config.toolRegistry;
 	}
 
 	/**
@@ -258,7 +247,9 @@ export class MessageRouter implements MessageRouterInterface {
 
 			try {
 				// Continue the session from checkpoint - this restores message history
-				const newHandle = await this._coordinator.continue(agentId, input, adapter);
+				const newHandle = await this._coordinator.continue(agentId, input, adapter, {
+					tools: this._toolRegistry,
+				});
 				this._logger.info(
 					{ agentId: newHandle.id, message: agentInput.message.substring(0, 50) },
 					'Continued conversation from checkpoint',
@@ -492,7 +483,9 @@ export class MessageRouter implements MessageRouterInterface {
 		// Create a new adapter for the restored agent
 		try {
 			const adapter = await this._adapterFactory(agentId);
-			const newHandle = await this._coordinator.continue(agentId, input, adapter);
+			const newHandle = await this._coordinator.continue(agentId, input, adapter, {
+				tools: this._toolRegistry,
+			});
 			this._logger.info(
 				{ agentId: newHandle.id, message: input.message?.substring(0, 50) },
 				'Restored conversation from checkpoint after restart',
@@ -524,7 +517,7 @@ export class MessageRouter implements MessageRouterInterface {
 				...this._defaultSpawnContext.metadata,
 				channelId,
 			},
-			tools: createEmptyToolRegistry(),
+			tools: this._toolRegistry,
 			input,
 		};
 

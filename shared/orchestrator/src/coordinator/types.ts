@@ -6,6 +6,7 @@ import type { AgentAdapter } from '../adapters/types';
 import type { CoordinatorEvent } from '../events/types';
 import type { AgentHandle } from '../handle/types';
 import type { AgentCheckpoint, SnapshotStore } from '../snapshot/types';
+import type { ToolRegistryInterface } from '../tools/types';
 import type {
 	AgentFilter,
 	AgentInput,
@@ -15,6 +16,14 @@ import type {
 	Disposable,
 	ShutdownOptions,
 } from '../types/core';
+
+/**
+ * Configuration for continuing a session.
+ */
+export interface ContinueConfig {
+	/** Tools available to the agent */
+	tools?: ToolRegistryInterface;
+}
 
 /**
  * Coordinator interface.
@@ -42,9 +51,15 @@ export interface Coordinator {
 	 * @param sessionId - The session ID to continue
 	 * @param input - New input to send to the agent
 	 * @param adapter - The adapter to use (may be different from original)
+	 * @param config - Optional configuration (tools, etc.)
 	 * @returns A handle to the continued agent
 	 */
-	continue(sessionId: AgentSessionId, input: AgentInput, adapter: AgentAdapter): Promise<AgentHandle>;
+	continue(
+		sessionId: AgentSessionId,
+		input: AgentInput,
+		adapter: AgentAdapter,
+		config?: ContinueConfig,
+	): Promise<AgentHandle>;
 
 	/**
 	 * Get an agent by session ID.

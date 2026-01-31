@@ -14,7 +14,6 @@ export type MediaSource =
 export interface TextContent {
 	type: 'text';
 	text: string;
-	formattingHint?: 'plain' | 'markdown' | 'html';
 }
 
 // Media Content (inbound)

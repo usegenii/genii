@@ -7,11 +7,52 @@ const PREFERENCES_FILENAME = 'preferences.toml';
 const DEFAULT_PREFERENCES: PreferencesConfig = {
 	agents: {
 		defaultModels: [],
+		tools: {
+			shell: {
+				defaultWorkingDir: undefined,
+				defaultTimeout: 30_000,
+				maxOutputLength: 50_000,
+			},
+		},
 	},
 	logging: {
 		level: 'info',
 	},
 };
+
+/**
+ * Deep merge two objects, with source values taking precedence.
+ * Handles nested objects recursively.
+ */
+function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
+	const result = { ...target };
+
+	for (const key of Object.keys(source) as (keyof T)[]) {
+		const sourceValue = source[key];
+		const targetValue = target[key];
+
+		if (
+			sourceValue !== undefined &&
+			typeof sourceValue === 'object' &&
+			sourceValue !== null &&
+			!Array.isArray(sourceValue) &&
+			typeof targetValue === 'object' &&
+			targetValue !== null &&
+			!Array.isArray(targetValue)
+		) {
+			// Both are objects, merge recursively
+			result[key] = deepMerge(
+				targetValue as Record<string, unknown>,
+				sourceValue as Record<string, unknown>,
+			) as T[keyof T];
+		} else if (sourceValue !== undefined) {
+			// Use source value if defined
+			result[key] = sourceValue as T[keyof T];
+		}
+	}
+
+	return result;
+}
 
 /**
  * Load preferences configuration from a TOML file.
@@ -26,11 +67,11 @@ const DEFAULT_PREFERENCES: PreferencesConfig = {
  */
 export async function loadPreferencesConfig(basePath: string): Promise<PreferencesConfig> {
 	const filePath = path.join(basePath, PREFERENCES_FILENAME);
-	const config = await readTomlFileOptional<PreferencesConfig>(filePath);
+	const config = await readTomlFileOptional<Partial<PreferencesConfig>>(filePath);
 
 	if (!config) {
 		return DEFAULT_PREFERENCES;
 	}
 
-	return config;
+	return deepMerge(DEFAULT_PREFERENCES, config);
 }

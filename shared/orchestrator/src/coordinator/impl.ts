@@ -18,7 +18,7 @@ import type {
 	Disposable,
 	ShutdownOptions,
 } from '../types/core';
-import type { Coordinator, CoordinatorConfig } from './types';
+import type { ContinueConfig, Coordinator, CoordinatorConfig } from './types';
 
 /**
  * Tracked agent entry with handle and adapter.
@@ -226,7 +226,12 @@ export class CoordinatorImpl implements Coordinator {
 		return this.config.snapshotStore.load(sessionId);
 	}
 
-	async continue(sessionId: AgentSessionId, input: AgentInput, adapter: AgentAdapter): Promise<AgentHandle> {
+	async continue(
+		sessionId: AgentSessionId,
+		input: AgentInput,
+		adapter: AgentAdapter,
+		continueConfig?: ContinueConfig,
+	): Promise<AgentHandle> {
 		if (this._status !== 'running') {
 			throw new Error(`Cannot continue agent when coordinator is ${this._status}`);
 		}
@@ -250,12 +255,13 @@ export class CoordinatorImpl implements Coordinator {
 			task: checkpoint.session.task,
 			input,
 			parentId: checkpoint.session.parentId,
+			tools: continueConfig?.tools,
 			tags: checkpoint.session.tags,
 			metadata: checkpoint.session.metadata,
 		});
 
 		// Create handle - reusing the session ID from checkpoint
-		const config: AgentSpawnConfig = {
+		const spawnConfig: AgentSpawnConfig = {
 			guidancePath,
 			task: checkpoint.session.task,
 			input,
@@ -263,7 +269,7 @@ export class CoordinatorImpl implements Coordinator {
 			tags: checkpoint.session.tags,
 			metadata: checkpoint.session.metadata,
 		};
-		const handle = createAgentHandle(instance, config);
+		const handle = createAgentHandle(instance, spawnConfig);
 
 		// Store handle and adapter
 		this.agents.set(handle.id, { handle, adapter });
@@ -314,8 +320,8 @@ export class CoordinatorImpl implements Coordinator {
 		this.emitter.emit({
 			type: 'agent_spawned',
 			sessionId: handle.id,
-			tags: config.tags,
-			parentId: config.parentId,
+			tags: spawnConfig.tags,
+			parentId: spawnConfig.parentId,
 			timestamp: Date.now(),
 		});
 

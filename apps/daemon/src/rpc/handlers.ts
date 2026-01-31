@@ -11,6 +11,7 @@ import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
+import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { resolveDefaultModel } from '../models/resolve';
@@ -67,6 +68,8 @@ export interface RpcHandlerContext {
 	modelFactory?: ModelFactory;
 	/** Application config for preferences and model resolution */
 	appConfig?: Config;
+	/** Tool registry for agents */
+	toolRegistry?: ToolRegistryInterface;
 }
 
 /**
@@ -387,7 +390,7 @@ async function handleAgentContinue(
 	params: RpcMethods['agent.continue'],
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['agent.continue']> {
-	const { coordinator, modelFactory, logger } = context;
+	const { coordinator, modelFactory, toolRegistry, logger } = context;
 
 	if (!modelFactory) {
 		throw new Error('Model factory not configured - cannot continue agents');
@@ -422,7 +425,9 @@ async function handleAgentContinue(
 	});
 
 	// Continue the session via coordinator
-	const handle = await coordinator.continue(params.sessionId, params.input, adapter);
+	const handle = await coordinator.continue(params.sessionId, params.input, adapter, {
+		tools: toolRegistry,
+	});
 
 	logger.info({ sessionId: handle.id, model: modelIdentifier }, 'Agent continued');
 

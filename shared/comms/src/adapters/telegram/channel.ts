@@ -3,7 +3,7 @@
  */
 
 import type { Channel } from '../../channel/types';
-import type { CompoundContent, MediaOutbound, OutboundContent, TextContent } from '../../content/types';
+import type { MediaOutbound, OutboundContent } from '../../content/types';
 import { TypedEventEmitter } from '../../events/emitter';
 import type {
 	ChannelConnectedEvent,
@@ -19,6 +19,7 @@ import { type Logger, noopLogger } from '../../logging/types';
 import type { ChannelId, ChannelStatus, Disposable } from '../../types/core';
 import { generateChannelId } from '../../types/core';
 import { decodeRef, mapUpdate } from './mappers';
+import { markdownToTelegramHtml } from './markdown';
 import { TelegramTransport } from './transport';
 import type { TelegramConfig, TelegramFile, TelegramUpdate } from './types';
 
@@ -119,11 +120,15 @@ export class TelegramChannel implements Channel {
 					}
 
 					// Handle text and compound content
-					const { text, parseMode } = this.getTextFromContent(intent.content);
+					const text = this.getTextFromContent(intent.content);
+
+					// Convert markdown to Telegram-compatible HTML
+					const html = markdownToTelegramHtml(text);
 
 					const params: SendMessageParams = {
 						chat_id: chatId,
-						text,
+						text: html,
+						parse_mode: 'HTML',
 					};
 
 					if (threadId !== undefined) {
@@ -132,10 +137,6 @@ export class TelegramChannel implements Channel {
 
 					if (replyToMessageId !== undefined) {
 						params.reply_to_message_id = replyToMessageId;
-					}
-
-					if (parseMode) {
-						params.parse_mode = parseMode;
 					}
 
 					this._logger.debug({ chatId, textLength: text.length }, 'Sending text message');
@@ -426,64 +427,28 @@ export class TelegramChannel implements Channel {
 	}
 
 	/**
-	 * Extract text and parse mode from OutboundContent.
+	 * Extract text from OutboundContent.
 	 */
-	private getTextFromContent(content: OutboundContent): { text: string; parseMode?: 'MarkdownV2' | 'HTML' } {
+	private getTextFromContent(content: OutboundContent): string {
 		if (content.type === 'text') {
-			return this.extractFromTextContent(content);
+			return content.text;
 		}
 
 		if (content.type === 'compound') {
-			return this.extractFromCompoundContent(content);
+			const textParts: string[] = [];
+			for (const part of content.parts) {
+				if (part.type === 'text') {
+					textParts.push(part.text);
+				}
+			}
+			return textParts.join('\n');
 		}
 
 		if (content.type === 'location') {
-			return { text: `Location: ${content.latitude}, ${content.longitude}` };
+			return `Location: ${content.latitude}, ${content.longitude}`;
 		}
 
 		// Media is handled separately
-		return { text: '' };
-	}
-
-	/**
-	 * Extract text and parse mode from TextContent.
-	 */
-	private extractFromTextContent(content: TextContent): { text: string; parseMode?: 'MarkdownV2' | 'HTML' } {
-		const parseMode = this.mapFormattingHint(content.formattingHint);
-		return { text: content.text, parseMode };
-	}
-
-	/**
-	 * Extract text from CompoundContent (combine text parts).
-	 */
-	private extractFromCompoundContent(content: CompoundContent): { text: string; parseMode?: 'MarkdownV2' | 'HTML' } {
-		const textParts: string[] = [];
-		let parseMode: 'MarkdownV2' | 'HTML' | undefined;
-
-		for (const part of content.parts) {
-			if (part.type === 'text') {
-				textParts.push(part.text);
-				// Use the first text part's formatting hint
-				if (!parseMode) {
-					parseMode = this.mapFormattingHint(part.formattingHint);
-				}
-			}
-		}
-
-		return { text: textParts.join('\n'), parseMode };
-	}
-
-	/**
-	 * Map formatting hint to Telegram parse mode.
-	 */
-	private mapFormattingHint(hint?: 'plain' | 'markdown' | 'html'): 'MarkdownV2' | 'HTML' | undefined {
-		switch (hint) {
-			case 'markdown':
-				return 'MarkdownV2';
-			case 'html':
-				return 'HTML';
-			default:
-				return undefined;
-		}
+		return '';
 	}
 }

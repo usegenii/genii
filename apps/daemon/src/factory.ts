@@ -16,6 +16,10 @@ import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import { createFileSnapshotStore } from '@geniigotchi/orchestrator/snapshot/store';
 import type { SnapshotStore } from '@geniigotchi/orchestrator/snapshot/types';
+import { createToolRegistry } from '@geniigotchi/orchestrator/tools/registry';
+import { DEFAULT_MAX_OUTPUT_LENGTH, DEFAULT_TIMEOUT_MS } from '@geniigotchi/orchestrator/tools/shell/constants';
+import { createShellTool } from '@geniigotchi/orchestrator/tools/shell/tool';
+import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
 import { setupCommandSystem } from './commands/setup';
 import { ConversationManager } from './conversations/manager';
 import { createFileConversationStore } from './conversations/store';
@@ -111,6 +115,7 @@ interface CreateRpcServerDepsConfig {
 	logger: Logger;
 	modelFactory?: ModelFactory;
 	appConfig?: Config;
+	toolRegistry?: ToolRegistryInterface;
 }
 
 /**
@@ -140,6 +145,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		logger: deps.logger,
 		modelFactory: deps.modelFactory,
 		appConfig: deps.appConfig,
+		toolRegistry: deps.toolRegistry,
 	};
 
 	// Create handlers
@@ -225,6 +231,16 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		logger,
 	);
 
+	// Create tool registry with shell tool
+	const toolRegistry = createToolRegistry({ logger });
+	const shellPrefs = options.config?.getPreferences()?.agents?.tools?.shell;
+	const shellTool = createShellTool({
+		defaultWorkingDir: shellPrefs?.defaultWorkingDir,
+		defaultTimeout: shellPrefs?.defaultTimeout ?? DEFAULT_TIMEOUT_MS,
+		maxOutputLength: shellPrefs?.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH,
+	});
+	toolRegistry.register(shellTool);
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
@@ -246,6 +262,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		},
 		logger,
 		commandExecutor,
+		toolRegistry,
 	};
 	const router = createMessageRouter(routerConfig);
 
@@ -277,6 +294,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		logger,
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
+		toolRegistry,
 	});
 
 	// Create and return daemon instance
@@ -362,6 +380,16 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		logger,
 	);
 
+	// Create tool registry with shell tool
+	const toolRegistry = createToolRegistry({ logger });
+	const shellPrefs = options.config?.getPreferences()?.agents?.tools?.shell;
+	const shellTool = createShellTool({
+		defaultWorkingDir: shellPrefs?.defaultWorkingDir,
+		defaultTimeout: shellPrefs?.defaultTimeout ?? DEFAULT_TIMEOUT_MS,
+		maxOutputLength: shellPrefs?.maxOutputLength ?? DEFAULT_MAX_OUTPUT_LENGTH,
+	});
+	toolRegistry.register(shellTool);
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
@@ -383,6 +411,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		},
 		logger,
 		commandExecutor,
+		toolRegistry,
 	};
 	const router = createMessageRouter(routerConfig);
 
@@ -414,6 +443,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		logger,
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
+		toolRegistry,
 	});
 
 	// Create and return daemon instance
