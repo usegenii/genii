@@ -24,6 +24,7 @@
 		"@geniigotchi/config": "workspace:*",
 		"@geniigotchi/models": "workspace:*",
 		"@geniigotchi/comms": "workspace:*",
+		"@geniigotchi/guidance": "workspace:*",
 		"pino": "^9.0.0",
 		"pino-pretty": "^11.0.0"
 	},

@@ -10,6 +10,7 @@ import { registerChannelCommands } from './commands/channel/list';
 import { registerConfigCommands } from './commands/config/show';
 import { registerConversationCommands } from './commands/conversation/list';
 import { registerDaemonCommands } from './commands/daemon/start';
+import { registerOnboardCommand } from './commands/onboard';
 import { tuiCommand } from './commands/tui';
 
 export const program = new Command();
@@ -28,6 +29,9 @@ registerAgentCommands(program);
 registerChannelCommands(program);
 registerConversationCommands(program);
 registerConfigCommands(program);
+
+// Top-level commands
+registerOnboardCommand(program);
 
 // TUI command
 program.addCommand(tuiCommand);

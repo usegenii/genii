@@ -312,6 +312,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const runtimeConfig: DaemonRuntimeConfig = {
 		socketPath: config.socketPath,
 		storagePath: config.dataPath,
+		guidancePath,
 		logLevel: config.logLevel,
 		startTime: Date.now(),
 		version: DAEMON_VERSION,
@@ -487,6 +488,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const runtimeConfig: DaemonRuntimeConfig = {
 		socketPath: config.socketPath,
 		storagePath: config.dataPath,
+		guidancePath,
 		logLevel: config.logLevel,
 		startTime: Date.now(),
 		version: DAEMON_VERSION,

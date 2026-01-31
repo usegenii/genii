@@ -182,6 +182,44 @@ export interface ConversationDetails extends ConversationSummary {
 }
 
 // =============================================================================
+// Onboard Types
+// =============================================================================
+
+/**
+ * Status of the onboard operation.
+ */
+export interface OnboardStatus {
+	/** Path where guidance files will be copied */
+	guidancePath: string;
+	/** List of template files available to copy */
+	templates: string[];
+	/** List of files that already exist and would be overwritten */
+	existing: string[];
+}
+
+/**
+ * Result of the onboard execution.
+ */
+export interface OnboardResult {
+	/** Files that were copied */
+	copied: string[];
+	/** Files that were backed up (as .bak) */
+	backedUp: string[];
+	/** Files that were skipped (dry-run mode) */
+	skipped: string[];
+}
+
+/**
+ * Options for executing onboard.
+ */
+export interface OnboardExecuteOptions {
+	/** Create .bak files for overwritten files */
+	backup: boolean;
+	/** Only report what would be done, don't actually copy */
+	dryRun: boolean;
+}
+
+// =============================================================================
 // Line Decoder (for socket communication)
 // =============================================================================
 
@@ -354,6 +392,10 @@ export interface DaemonClient {
 	// Config methods
 	getConfig(section?: string): Promise<unknown>;
 	validateConfig(): Promise<{ valid: boolean; errors?: string[] }>;
+
+	// Onboard methods
+	onboardStatus(): Promise<OnboardStatus>;
+	onboardExecute(options: OnboardExecuteOptions): Promise<OnboardResult>;
 
 	// Subscriptions
 	subscribe(type: string, filter?: unknown): Promise<string>;
@@ -651,6 +693,18 @@ class SocketDaemonClient implements DaemonClient {
 
 	async validateConfig(): Promise<{ valid: boolean; errors?: string[] }> {
 		return this._request('config.validate');
+	}
+
+	// =========================================================================
+	// Onboard Methods
+	// =========================================================================
+
+	async onboardStatus(): Promise<OnboardStatus> {
+		return this._request('onboard.status');
+	}
+
+	async onboardExecute(options: OnboardExecuteOptions): Promise<OnboardResult> {
+		return this._request('onboard.execute', options);
 	}
 
 	// =========================================================================

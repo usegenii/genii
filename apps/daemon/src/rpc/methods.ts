@@ -147,6 +147,34 @@ export interface ConfigValidationResult {
 }
 
 // =============================================================================
+// Onboard Types
+// =============================================================================
+
+/**
+ * Status of the onboard operation.
+ */
+export interface OnboardStatus {
+	/** Path where guidance files will be copied */
+	guidancePath: string;
+	/** List of template files available to copy */
+	templates: string[];
+	/** List of files that already exist and would be overwritten */
+	existing: string[];
+}
+
+/**
+ * Result of the onboard execution.
+ */
+export interface OnboardResult {
+	/** Files that were copied */
+	copied: string[];
+	/** Files that were backed up (as .bak) */
+	backedUp: string[];
+	/** Files that were skipped (dry-run mode) */
+	skipped: string[];
+}
+
+// =============================================================================
 // RPC Method Names
 // =============================================================================
 
@@ -188,7 +216,10 @@ export type RpcMethodName =
 	| 'unsubscribe'
 	// Configuration methods
 	| 'config.get'
-	| 'config.validate';
+	| 'config.validate'
+	// Onboard methods
+	| 'onboard.status'
+	| 'onboard.execute';
 
 // =============================================================================
 // RPC Method Parameters
@@ -298,6 +329,15 @@ export interface RpcMethods {
 	'config.validate': {
 		config: Record<string, unknown>;
 	};
+
+	// Onboard methods
+	'onboard.status': Record<string, never>;
+	'onboard.execute': {
+		/** Create .bak files for overwritten files */
+		backup: boolean;
+		/** Only report what would be done, don't actually copy */
+		dryRun: boolean;
+	};
 }
 
 // =============================================================================
@@ -348,4 +388,8 @@ export interface RpcMethodResults {
 	// Configuration methods
 	'config.get': DaemonConfig;
 	'config.validate': ConfigValidationResult;
+
+	// Onboard methods
+	'onboard.status': OnboardStatus;
+	'onboard.execute': OnboardResult;
 }

@@ -15,6 +15,7 @@ import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/type
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { resolveDefaultModel } from '../models/resolve';
+import { executeOnboard, getOnboardStatus } from '../onboard';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
 import type { TransportConnection } from '../transport/types';
 import type {
@@ -26,6 +27,8 @@ import type {
 	ConversationSummary,
 	DaemonConfig,
 	DaemonStatus,
+	OnboardResult,
+	OnboardStatus,
 	RpcMethodName,
 	RpcMethodResults,
 	RpcMethods,
@@ -80,6 +83,8 @@ export interface DaemonRuntimeConfig {
 	socketPath: string;
 	/** Storage path for persistence */
 	storagePath: string;
+	/** Path to guidance directory */
+	guidancePath: string;
 	/** Log level */
 	logLevel: string;
 	/** Daemon start time */
@@ -171,6 +176,12 @@ export function createHandlers(
 	handlers.set('config.get', (_params, ctx) => handleConfigGet(ctx));
 	handlers.set('config.validate', (params, ctx) =>
 		handleConfigValidate(params as RpcMethods['config.validate'], ctx),
+	);
+
+	// Onboard methods
+	handlers.set('onboard.status', (_params, ctx) => handleOnboardStatus(ctx));
+	handlers.set('onboard.execute', (params, ctx) =>
+		handleOnboardExecute(params as RpcMethods['onboard.execute'], ctx),
 	);
 
 	return handlers;
@@ -673,4 +684,35 @@ async function handleConfigValidate(
 		valid: errors.length === 0,
 		errors: errors.length > 0 ? errors : undefined,
 	};
+}
+
+// =============================================================================
+// Onboard Handlers
+// =============================================================================
+
+async function handleOnboardStatus(context: RpcHandlerContext): Promise<OnboardStatus> {
+	const { config, logger } = context;
+
+	return getOnboardStatus({
+		guidancePath: config.guidancePath,
+		logger,
+	});
+}
+
+async function handleOnboardExecute(
+	params: RpcMethods['onboard.execute'],
+	context: RpcHandlerContext,
+): Promise<OnboardResult> {
+	const { config, logger } = context;
+
+	return executeOnboard(
+		{
+			guidancePath: config.guidancePath,
+			logger,
+		},
+		{
+			backup: params.backup,
+			dryRun: params.dryRun,
+		},
+	);
 }
