@@ -39,8 +39,12 @@ export interface ModelFactoryOptions {
  * Resolved model configuration with all values needed to create an adapter.
  */
 export interface ResolvedModelConfig {
-	/** Provider type */
+	/** Provider type (anthropic, openai, google) - used for API routing */
 	providerType: ProviderType;
+	/** User-defined provider name from config (for checkpointing) */
+	userProviderName: string;
+	/** User-defined model name from config (for checkpointing) */
+	userModelName: string;
 	/** Model ID to pass to the API */
 	modelId: string;
 	/** API key for authentication */

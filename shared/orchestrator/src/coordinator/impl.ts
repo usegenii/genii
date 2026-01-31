@@ -8,8 +8,10 @@ import type { CoordinatorEvent } from '../events/types';
 import { createGuidanceContext } from '../guidance/context';
 import { type AgentHandleImpl, createAgentHandle } from '../handle/impl';
 import type { AgentHandle } from '../handle/types';
+import type { AgentCheckpoint } from '../snapshot/types';
 import type {
 	AgentFilter,
+	AgentInput,
 	AgentSessionId,
 	AgentSpawnConfig,
 	CoordinatorStatus,
@@ -141,10 +143,20 @@ export class CoordinatorImpl implements Coordinator {
 
 				// Save checkpoint if we have a store
 				if (this.config.snapshotStore) {
+					const agentEntry = this.agents.get(handle.id);
 					handle
 						.checkpoint()
 						.then((checkpoint) => {
-							this.config.snapshotStore?.save(checkpoint);
+							// Inject Geniigotchi provider/model from adapter into checkpoint
+							const enrichedCheckpoint: AgentCheckpoint = {
+								...checkpoint,
+								adapterConfig: {
+									...checkpoint.adapterConfig,
+									provider: agentEntry?.adapter.modelProvider ?? 'unknown',
+									model: agentEntry?.adapter.modelName ?? 'unknown',
+								},
+							};
+							this.config.snapshotStore?.save(enrichedCheckpoint);
 						})
 						.catch((_error) => {
 							// Checkpoint save failed - non-fatal, agent completed successfully
@@ -198,6 +210,119 @@ export class CoordinatorImpl implements Coordinator {
 		}
 
 		return results;
+	}
+
+	async listCheckpoints(): Promise<AgentSessionId[]> {
+		if (!this.config.snapshotStore) {
+			return [];
+		}
+		return this.config.snapshotStore.list();
+	}
+
+	async loadCheckpoint(sessionId: AgentSessionId): Promise<AgentCheckpoint | null> {
+		if (!this.config.snapshotStore) {
+			return null;
+		}
+		return this.config.snapshotStore.load(sessionId);
+	}
+
+	async continue(sessionId: AgentSessionId, input: AgentInput, adapter: AgentAdapter): Promise<AgentHandle> {
+		if (this._status !== 'running') {
+			throw new Error(`Cannot continue agent when coordinator is ${this._status}`);
+		}
+
+		// Load checkpoint
+		const checkpoint = await this.loadCheckpoint(sessionId);
+		if (!checkpoint) {
+			throw new Error(`Checkpoint not found for session: ${sessionId}`);
+		}
+
+		// Create guidance context from checkpoint
+		const guidancePath = checkpoint.guidance.guidancePath ?? this.config.defaultGuidancePath;
+		if (!guidancePath) {
+			throw new Error('No guidance path in checkpoint and no default configured');
+		}
+		const guidance = await createGuidanceContext({ root: guidancePath });
+
+		// Restore instance via adapter with new input
+		const instance = await adapter.restore(checkpoint, {
+			guidance,
+			task: checkpoint.session.task,
+			input,
+			parentId: checkpoint.session.parentId,
+			tags: checkpoint.session.tags,
+			metadata: checkpoint.session.metadata,
+		});
+
+		// Create handle - reusing the session ID from checkpoint
+		const config: AgentSpawnConfig = {
+			guidancePath,
+			task: checkpoint.session.task,
+			input,
+			parentId: checkpoint.session.parentId,
+			tags: checkpoint.session.tags,
+			metadata: checkpoint.session.metadata,
+		};
+		const handle = createAgentHandle(instance, config);
+
+		// Store handle and adapter
+		this.agents.set(handle.id, { handle, adapter });
+
+		// Subscribe to agent events (same as spawn)
+		handle.subscribe((event) => {
+			this.emitter.emit({
+				type: 'agent_event',
+				sessionId: handle.id,
+				event,
+				timestamp: Date.now(),
+			});
+
+			// Handle completion
+			if (event.type === 'done') {
+				this.emitter.emit({
+					type: 'agent_done',
+					sessionId: handle.id,
+					result: event.result,
+					timestamp: Date.now(),
+				});
+
+				// Save checkpoint if we have a store (overwrites previous)
+				if (this.config.snapshotStore) {
+					const agentEntry = this.agents.get(handle.id);
+					handle
+						.checkpoint()
+						.then((checkpoint) => {
+							// Inject Geniigotchi provider/model from adapter into checkpoint
+							const enrichedCheckpoint: AgentCheckpoint = {
+								...checkpoint,
+								adapterConfig: {
+									...checkpoint.adapterConfig,
+									provider: agentEntry?.adapter.modelProvider ?? 'unknown',
+									model: agentEntry?.adapter.modelName ?? 'unknown',
+								},
+							};
+							this.config.snapshotStore?.save(enrichedCheckpoint);
+						})
+						.catch((_error) => {
+							// Checkpoint save failed - non-fatal
+						});
+				}
+			}
+		});
+
+		// Emit continued event (using spawned event type for now)
+		this.emitter.emit({
+			type: 'agent_spawned',
+			sessionId: handle.id,
+			tags: config.tags,
+			parentId: config.parentId,
+			timestamp: Date.now(),
+		});
+
+		// Start the agent
+		handle.start();
+
+		return handle;
 	}
 
 	subscribe(handler: (event: CoordinatorEvent) => void): Disposable {

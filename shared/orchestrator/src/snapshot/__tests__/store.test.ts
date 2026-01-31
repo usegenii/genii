@@ -14,11 +14,9 @@ import {
 	type InMemorySnapshotStore,
 } from '../store';
 import type { AgentCheckpoint } from '../types';
-import { CHECKPOINT_VERSION } from '../types';
 
 function createMockCheckpoint(id: string): AgentCheckpoint {
 	return {
-		version: CHECKPOINT_VERSION,
 		timestamp: Date.now(),
 		adapterName: 'mock',
 		session: {
@@ -38,7 +36,11 @@ function createMockCheckpoint(id: string): AgentCheckpoint {
 			memoryWrites: [{ path: 'test.md', content: '# Test', timestamp: Date.now() }],
 			systemState: { counter: 1 },
 		},
-		adapterState: { messages: [] },
+		messages: [],
+		adapterConfig: {
+			provider: 'mock',
+			model: 'mock-model',
+		},
 		toolExecutions: [],
 	};
 }

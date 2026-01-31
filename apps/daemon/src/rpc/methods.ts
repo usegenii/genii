@@ -163,11 +163,13 @@ export type RpcMethodName =
 	| 'agent.list'
 	| 'agent.get'
 	| 'agent.spawn'
+	| 'agent.continue'
 	| 'agent.terminate'
 	| 'agent.pause'
 	| 'agent.resume'
 	| 'agent.send'
 	| 'agent.snapshot'
+	| 'agent.listCheckpoints'
 	// Channel methods
 	| 'channel.list'
 	| 'channel.get'
@@ -239,6 +241,15 @@ export interface RpcMethods {
 	'agent.snapshot': {
 		id: AgentSessionId;
 	};
+	'agent.continue': {
+		/** Session ID to continue from */
+		sessionId: AgentSessionId;
+		/** New input to send */
+		input: AgentInput;
+		/** Optional model override in format "provider/model-name" */
+		model?: string;
+	};
+	'agent.listCheckpoints': Record<string, never>;
 
 	// Channel methods
 	'channel.list': Record<string, never>;
@@ -312,6 +323,8 @@ export interface RpcMethodResults {
 	'agent.resume': { ok: true };
 	'agent.send': { ok: true };
 	'agent.snapshot': AgentSnapshot;
+	'agent.continue': { id: AgentSessionId };
+	'agent.listCheckpoints': AgentSessionId[];
 
 	// Channel methods
 	'channel.list': ChannelSummary[];

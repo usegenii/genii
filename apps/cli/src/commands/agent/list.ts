@@ -7,6 +7,8 @@ import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
 import { formatDuration } from '../../utils/time';
+import { checkpointsCommand } from './checkpoints';
+import { continueCommand } from './continue';
 import { pauseCommand } from './pause';
 import { resumeCommand } from './resume';
 import { sendCommand } from './send';
@@ -138,6 +140,8 @@ export function registerAgentCommands(program: Command): void {
 	listCommand(agent);
 	showCommand(agent);
 	spawnCommand(agent);
+	continueCommand(agent);
+	checkpointsCommand(agent);
 	terminateCommand(agent);
 	pauseCommand(agent);
 	resumeCommand(agent);

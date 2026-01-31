@@ -127,9 +127,9 @@ model-id = "gpt-4-turbo"
 			const result = await loadModelsConfig(modelsDir);
 
 			// Section names are also transformed to camelCase
-			expect(result['claudeOpus']).toBeDefined();
-			expect(result['claudeOpus'].provider).toBe('anthropic');
-			expect(result['claudeOpus'].modelId).toBe('claude-opus-4-5-20251101');
+			expect(result.claudeOpus).toBeDefined();
+			expect(result.claudeOpus.provider).toBe('anthropic');
+			expect(result.claudeOpus.modelId).toBe('claude-opus-4-5-20251101');
 
 			// gpt-4 stays as gpt-4 because the regex only transforms -[a-z]
 			expect(result['gpt-4']).toBeDefined();
@@ -173,12 +173,12 @@ credential = "secret:discord-bot-token"
 			expect(result.settings.rateLimitPerMinute).toBe(120);
 
 			// Section names are also transformed to camelCase
-			expect(result.channels['telegramPersonal']).toBeDefined();
-			expect(result.channels['telegramPersonal'].type).toBe('telegram');
-			expect(result.channels['telegramPersonal'].credential).toBe('secret:telegram-bot-token');
+			expect(result.channels.telegramPersonal).toBeDefined();
+			expect(result.channels.telegramPersonal.type).toBe('telegram');
+			expect(result.channels.telegramPersonal.credential).toBe('secret:telegram-bot-token');
 
-			expect(result.channels['discordServer']).toBeDefined();
-			expect(result.channels['discordServer'].type).toBe('discord');
+			expect(result.channels.discordServer).toBeDefined();
+			expect(result.channels.discordServer.type).toBe('discord');
 		});
 
 		it('returns defaults for missing file', async () => {

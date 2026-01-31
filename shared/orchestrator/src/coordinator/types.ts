@@ -5,9 +5,10 @@
 import type { AgentAdapter } from '../adapters/types';
 import type { CoordinatorEvent } from '../events/types';
 import type { AgentHandle } from '../handle/types';
-import type { SnapshotStore } from '../snapshot/types';
+import type { AgentCheckpoint, SnapshotStore } from '../snapshot/types';
 import type {
 	AgentFilter,
+	AgentInput,
 	AgentSessionId,
 	AgentSpawnConfig,
 	CoordinatorStatus,
@@ -35,6 +36,17 @@ export interface Coordinator {
 	spawn(adapter: AgentAdapter, config: AgentSpawnConfig): Promise<AgentHandle>;
 
 	/**
+	 * Continue a session from a checkpoint.
+	 * Restores the agent with its message history and queues new input.
+	 *
+	 * @param sessionId - The session ID to continue
+	 * @param input - New input to send to the agent
+	 * @param adapter - The adapter to use (may be different from original)
+	 * @returns A handle to the continued agent
+	 */
+	continue(sessionId: AgentSessionId, input: AgentInput, adapter: AgentAdapter): Promise<AgentHandle>;
+
+	/**
 	 * Get an agent by session ID.
 	 */
 	get(id: AgentSessionId): AgentHandle | undefined;
@@ -48,6 +60,16 @@ export interface Coordinator {
 	 * List agents matching a filter.
 	 */
 	list(filter?: AgentFilter): AgentHandle[];
+
+	/**
+	 * List available checkpoint session IDs.
+	 */
+	listCheckpoints(): Promise<AgentSessionId[]>;
+
+	/**
+	 * Load a checkpoint by session ID.
+	 */
+	loadCheckpoint(sessionId: AgentSessionId): Promise<AgentCheckpoint | null>;
 
 	/**
 	 * Subscribe to coordinator events.

@@ -10,11 +10,45 @@ import type { AgentSessionId, PartialAgentMetrics } from '../types/core';
 export type { GuidanceCheckpoint, MemoryWrite, ToolExecutionState };
 
 /**
+ * Common checkpoint message format (provider-agnostic).
+ * All adapters transform their native message format to/from this format.
+ */
+export interface CheckpointMessage {
+	role: 'user' | 'assistant' | 'tool_result';
+	content: CheckpointContent[];
+	timestamp: number;
+	/** For tool_result messages */
+	toolCallId?: string;
+	toolName?: string;
+	isError?: boolean;
+	/** For assistant messages - provider metadata */
+	provider?: string;
+	model?: string;
+}
+
+/**
+ * Content types for checkpoint messages.
+ */
+export type CheckpointContent =
+	| { type: 'text'; text: string }
+	| { type: 'image'; mediaType: string; data: string }
+	| { type: 'thinking'; text: string }
+	| { type: 'tool_use'; id: string; name: string; input: unknown };
+
+/**
+ * Adapter-specific configuration stored in checkpoints.
+ */
+export interface CheckpointAdapterConfig {
+	provider: string;
+	model: string;
+	thinkingLevel?: string;
+	[key: string]: unknown;
+}
+
+/**
  * Complete checkpoint of an agent's state.
  */
 export interface AgentCheckpoint {
-	/** Checkpoint format version */
-	version: number;
 	/** When the checkpoint was taken */
 	timestamp: number;
 	/** Name of the adapter that created this agent */
@@ -23,16 +57,13 @@ export interface AgentCheckpoint {
 	session: SessionCheckpoint;
 	/** Guidance state */
 	guidance: GuidanceCheckpoint;
-	/** Adapter-specific state (e.g., Pi message history) */
-	adapterState: unknown;
+	/** Common message format - all adapters transform to/from this */
+	messages: CheckpointMessage[];
+	/** Adapter-specific state (model config, thinking level, etc.) */
+	adapterConfig: CheckpointAdapterConfig;
 	/** State of tool executions */
 	toolExecutions: ToolExecutionState[];
 }
-
-/**
- * Current checkpoint format version.
- */
-export const CHECKPOINT_VERSION = 1;
 
 /**
  * Session state for checkpointing.

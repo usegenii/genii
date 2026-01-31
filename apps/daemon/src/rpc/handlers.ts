@@ -115,6 +115,7 @@ export function createHandlers(
 	handlers.set('agent.list', (params, ctx) => handleAgentList(params as RpcMethods['agent.list'], ctx));
 	handlers.set('agent.get', (params, ctx) => handleAgentGet(params as RpcMethods['agent.get'], ctx));
 	handlers.set('agent.spawn', (params, ctx) => handleAgentSpawn(params as RpcMethods['agent.spawn'], ctx));
+	handlers.set('agent.continue', (params, ctx) => handleAgentContinue(params as RpcMethods['agent.continue'], ctx));
 	handlers.set('agent.terminate', (params, ctx) =>
 		handleAgentTerminate(params as RpcMethods['agent.terminate'], ctx),
 	);
@@ -122,6 +123,7 @@ export function createHandlers(
 	handlers.set('agent.resume', (params, ctx) => handleAgentResume(params as RpcMethods['agent.resume'], ctx));
 	handlers.set('agent.send', (params, ctx) => handleAgentSend(params as RpcMethods['agent.send'], ctx));
 	handlers.set('agent.snapshot', (params, ctx) => handleAgentSnapshot(params as RpcMethods['agent.snapshot'], ctx));
+	handlers.set('agent.listCheckpoints', (_params, ctx) => handleListCheckpoints(ctx));
 
 	// Channel methods
 	handlers.set('channel.list', (_params, ctx) => handleChannelList(ctx));
@@ -364,6 +366,57 @@ async function handleAgentSnapshot(
 	}
 
 	return handle.snapshot();
+}
+
+async function handleAgentContinue(
+	params: RpcMethods['agent.continue'],
+	context: RpcHandlerContext,
+): Promise<RpcMethodResults['agent.continue']> {
+	const { coordinator, modelFactory, logger } = context;
+
+	if (!modelFactory) {
+		throw new Error('Model factory not configured - cannot continue agents');
+	}
+
+	// Load checkpoint to get model info
+	const checkpoint = await coordinator.loadCheckpoint(params.sessionId);
+	if (!checkpoint) {
+		throw new Error(`Checkpoint not found for session: ${params.sessionId}`);
+	}
+
+	// Determine model: use override if provided, else use checkpoint's model
+	let modelIdentifier: string;
+	if (params.model) {
+		modelIdentifier = params.model;
+	} else {
+		const { provider, model } = checkpoint.adapterConfig;
+		modelIdentifier = `${provider}/${model}`;
+	}
+
+	logger.info({ sessionId: params.sessionId, model: modelIdentifier }, 'Agent continue requested');
+
+	// Create adapter via model factory
+	const adapter = await modelFactory.createAdapter(modelIdentifier, {
+		thinkingLevel: checkpoint.adapterConfig.thinkingLevel as
+			| 'off'
+			| 'minimal'
+			| 'low'
+			| 'medium'
+			| 'high'
+			| undefined,
+	});
+
+	// Continue the session via coordinator
+	const handle = await coordinator.continue(params.sessionId, params.input, adapter);
+
+	logger.info({ sessionId: handle.id, model: modelIdentifier }, 'Agent continued');
+
+	return { id: handle.id };
+}
+
+async function handleListCheckpoints(context: RpcHandlerContext): Promise<RpcMethodResults['agent.listCheckpoints']> {
+	const { coordinator } = context;
+	return coordinator.listCheckpoints();
 }
 
 // =============================================================================

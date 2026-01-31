@@ -4,11 +4,10 @@
 
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import { Agent } from '@mariozechner/pi-agent-core';
-import type { Api, Model } from '@mariozechner/pi-ai';
+import type { Api, Message, Model } from '@mariozechner/pi-ai';
 import { getModels, streamSimple } from '@mariozechner/pi-ai';
 import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
 import type { AgentCheckpoint, ToolExecutionState } from '../../snapshot/types';
-import { CHECKPOINT_VERSION } from '../../snapshot/types';
 import { createToolRegistry } from '../../tools/registry';
 import { isSuspensionError } from '../../tools/suspension';
 import type { SuspensionRequest } from '../../tools/types';
@@ -22,6 +21,26 @@ import {
 	createToolExecutionTracker,
 	type ToolExecutionTracker,
 } from './guidance';
+import { checkpointToPiMessages, piMessagesToCheckpoint } from './messages';
+import type { PiAdapterOptions } from './types';
+
+/**
+ * Options for restoring an agent instance from a checkpoint.
+ */
+export interface RestoreOptions {
+	/** Pre-existing messages (in Pi format, already transformed) */
+	messages: Message[];
+	/** Session ID to reuse */
+	sessionId: AgentSessionId;
+	/** Created timestamp to preserve */
+	createdAt: number;
+	/** Initial turn count */
+	turnCount: number;
+	/** Provider name */
+	provider: string;
+	/** Model ID */
+	modelId: string;
+}
 
 /**
  * Pi agent instance.
@@ -57,11 +76,19 @@ export class PiAgentInstance implements AgentInstance {
 		options: {
 			apiKey?: string | (() => Promise<string | undefined>);
 			thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+			restoreOptions?: RestoreOptions;
 		} = {},
 	) {
-		this.id = generateAgentSessionId();
+		// Use restored session ID if available, otherwise generate new
+		this.id = options.restoreOptions?.sessionId ?? generateAgentSessionId();
 		this.config = config;
 		this.tracker = createToolExecutionTracker();
+
+		// Restore timestamps if provided
+		if (options.restoreOptions) {
+			this.createdAt = options.restoreOptions.createdAt;
+			this.turnCount = options.restoreOptions.turnCount;
+		}
 
 		if (typeof options.apiKey === 'function') {
 			this.apiKeyGetter = options.apiKey;
@@ -95,6 +122,9 @@ export class PiAgentInstance implements AgentInstance {
 			(toolCallId) => this.toolExecutionStates.get(toolCallId),
 		);
 
+		// Get initial messages - either from restore or empty
+		const initialMessages = options.restoreOptions?.messages ?? [];
+
 		// Create the Pi Agent
 		this.agent = new Agent({
 			initialState: {
@@ -102,7 +132,7 @@ export class PiAgentInstance implements AgentInstance {
 				model,
 				thinkingLevel: this.thinkingLevel,
 				tools: piTools,
-				messages: [],
+				messages: initialMessages as AgentMessage[],
 				isStreaming: false,
 				streamMessage: null,
 				pendingToolCalls: new Set(),
@@ -290,10 +320,9 @@ export class PiAgentInstance implements AgentInstance {
 	}
 
 	async checkpoint(): Promise<AgentCheckpoint> {
-		const messages = this.agent.state.messages;
+		const messages = this.agent.state.messages as Message[];
 
 		return {
-			version: CHECKPOINT_VERSION,
 			timestamp: Date.now(),
 			adapterName: 'pi',
 			session: {
@@ -314,8 +343,10 @@ export class PiAgentInstance implements AgentInstance {
 				memoryWrites: [],
 				systemState: {},
 			},
-			adapterState: {
-				messages: messages.map((m) => this.serializeMessage(m)),
+			messages: piMessagesToCheckpoint(messages),
+			// Note: adapterConfig.provider and adapterConfig.model are injected by the coordinator
+			// from the adapter's modelProvider and modelName properties
+			adapterConfig: {
 				thinkingLevel: this.thinkingLevel,
 			},
 			toolExecutions: [...this.toolExecutionStates.values()],
@@ -440,11 +471,6 @@ export class PiAgentInstance implements AgentInstance {
 		}
 		return undefined;
 	}
-
-	private serializeMessage(message: AgentMessage): unknown {
-		// Deep clone to ensure we can serialize
-		return JSON.parse(JSON.stringify(message));
-	}
 }
 
 /**
@@ -462,19 +488,22 @@ const PROVIDER_TO_API: Record<string, Api> = {
 function createCustomModel(
 	modelId: string,
 	providerType: string,
+	userProviderName: string,
 	baseUrl: string,
 	supportsReasoning: boolean,
 ): Model<Api> {
 	const api = PROVIDER_TO_API[providerType];
 	if (!api) {
-		throw new Error(`Unsupported provider type "${providerType}". Supported: ${Object.keys(PROVIDER_TO_API).join(', ')}`);
+		throw new Error(
+			`Unsupported provider type "${providerType}". Supported: ${Object.keys(PROVIDER_TO_API).join(', ')}`,
+		);
 	}
 
 	return {
 		id: modelId,
 		name: modelId,
 		api,
-		provider: 'custom',
+		provider: `custom:${userProviderName}`,
 		baseUrl,
 		reasoning: supportsReasoning,
 		input: ['text', 'image'],
@@ -490,29 +519,21 @@ function createCustomModel(
 export async function createPiAgentInstance(
 	config: AdapterCreateConfig,
 	options: {
-		provider: 'anthropic' | 'openai' | 'google';
-		model: string;
+		providerType: 'anthropic' | 'openai' | 'google';
+		userProviderName: string;
+		modelId: string;
 		apiKey?: string | (() => Promise<string | undefined>);
 		thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
 		baseUrl?: string;
 	},
 ): Promise<PiAgentInstance> {
-	let model: Model<Api>;
-
-	if (options.baseUrl) {
-		// Custom endpoint - create a custom model configuration
-		const supportsReasoning = options.thinkingLevel !== undefined && options.thinkingLevel !== 'off';
-		model = createCustomModel(options.model, options.provider, options.baseUrl, supportsReasoning);
-	} else {
-		// Standard provider - look up from known models
-		const models = getModels(options.provider);
-		const foundModel = models.find((m) => m.id === options.model || m.name === options.model);
-
-		if (!foundModel) {
-			throw new Error(`Model "${options.model}" not found for provider "${options.provider}"`);
-		}
-		model = foundModel as Model<Api>;
-	}
+	const model = resolveModel(
+		options.providerType,
+		options.userProviderName,
+		options.modelId,
+		options.baseUrl,
+		options.thinkingLevel,
+	);
 
 	// Build system prompt
 	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task);
@@ -520,5 +541,72 @@ export async function createPiAgentInstance(
 	return new PiAgentInstance(config, model, systemPrompt, {
 		apiKey: options.apiKey,
 		thinkingLevel: options.thinkingLevel,
+	});
+}
+
+/**
+ * Resolve a model from provider and model ID.
+ */
+function resolveModel(
+	providerType: string,
+	userProviderName: string,
+	modelId: string,
+	baseUrl?: string,
+	thinkingLevel?: string,
+): Model<Api> {
+	if (baseUrl) {
+		// Custom endpoint - create a custom model configuration
+		const supportsReasoning = thinkingLevel !== undefined && thinkingLevel !== 'off';
+		return createCustomModel(modelId, providerType, userProviderName, baseUrl, supportsReasoning);
+	}
+
+	// Standard provider - look up from known models
+	const models = getModels(providerType as 'anthropic' | 'openai' | 'google');
+	const foundModel = models.find((m) => m.id === modelId || m.name === modelId);
+
+	if (!foundModel) {
+		throw new Error(`Model "${modelId}" not found for provider "${providerType}"`);
+	}
+	return foundModel as Model<Api>;
+}
+
+/**
+ * Create a Pi agent instance from a checkpoint.
+ * This restores the agent with its previous message history.
+ */
+export async function createPiAgentInstanceFromCheckpoint(
+	checkpoint: AgentCheckpoint,
+	config: AdapterCreateConfig,
+	options: PiAdapterOptions,
+): Promise<PiAgentInstance> {
+	// Transform checkpoint messages back to Pi format
+	const piMessages = checkpointToPiMessages(checkpoint.messages);
+
+	// Resolve the model using the adapter's API model ID
+	const model = resolveModel(
+		options.providerType,
+		options.userProviderName,
+		options.modelId,
+		options.baseUrl,
+		options.thinkingLevel,
+	);
+
+	// Build system prompt
+	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task);
+
+	// Create restore options from checkpoint
+	const restoreOptions: RestoreOptions = {
+		messages: piMessages,
+		sessionId: checkpoint.session.id,
+		createdAt: checkpoint.session.createdAt,
+		turnCount: checkpoint.session.metrics.turns,
+		provider: checkpoint.adapterConfig.provider,
+		modelId: checkpoint.adapterConfig.model,
+	};
+
+	return new PiAgentInstance(config, model, systemPrompt, {
+		apiKey: options.apiKey,
+		thinkingLevel: options.thinkingLevel,
+		restoreOptions,
 	});
 }

@@ -4,7 +4,7 @@
 
 import type { AgentCheckpoint } from '../../snapshot/types';
 import type { AdapterCreateConfig, AgentAdapter, AgentInstance } from '../types';
-import { createPiAgentInstance } from './instance';
+import { createPiAgentInstance, createPiAgentInstanceFromCheckpoint } from './instance';
 import type { PiAdapterOptions } from './types';
 
 /**
@@ -12,24 +12,34 @@ import type { PiAdapterOptions } from './types';
  */
 export class PiAgentAdapter implements AgentAdapter {
 	readonly name = 'pi';
+	readonly modelProvider: string;
+	readonly modelName: string;
 	private options: PiAdapterOptions;
 
 	constructor(options: PiAdapterOptions) {
 		this.options = options;
+		// Store user-defined identifiers for checkpointing
+		this.modelProvider = options.userProviderName;
+		this.modelName = options.userModelName;
 	}
 
 	async create(config: AdapterCreateConfig): Promise<AgentInstance> {
 		return createPiAgentInstance(config, {
-			provider: this.options.provider,
-			model: this.options.model,
+			providerType: this.options.providerType,
+			userProviderName: this.options.userProviderName,
+			modelId: this.options.modelId,
 			apiKey: this.options.apiKey,
 			thinkingLevel: this.options.thinkingLevel,
 			baseUrl: this.options.baseUrl,
 		});
 	}
 
-	async restore(_checkpoint: AgentCheckpoint): Promise<AgentInstance> {
-		throw new Error('PiAgentAdapter.restore() is not yet implemented');
+	async restore(checkpoint: AgentCheckpoint, config: AdapterCreateConfig): Promise<AgentInstance> {
+		if (checkpoint.adapterName !== 'pi') {
+			throw new Error(`Cannot restore checkpoint from adapter "${checkpoint.adapterName}" with Pi adapter`);
+		}
+
+		return createPiAgentInstanceFromCheckpoint(checkpoint, config, this.options);
 	}
 }
 

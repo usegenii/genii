@@ -85,6 +85,8 @@ export class ModelFactory {
 
 		return {
 			providerType,
+			userProviderName: providerName,
+			userModelName: modelName,
 			modelId: modelConfig.modelId,
 			apiKey,
 			baseUrl: providerConfig.baseUrl,
@@ -116,8 +118,10 @@ export class ModelFactory {
 	 */
 	private buildAdapter(resolved: ResolvedModelConfig): AgentAdapter {
 		const options: PiAdapterOptions = {
-			provider: resolved.providerType,
-			model: resolved.modelId,
+			providerType: resolved.providerType,
+			userProviderName: resolved.userProviderName,
+			userModelName: resolved.userModelName,
+			modelId: resolved.modelId,
 			apiKey: resolved.apiKey,
 			baseUrl: resolved.baseUrl,
 			thinkingLevel: resolved.thinkingLevel,

@@ -15,6 +15,12 @@ export interface AgentAdapter {
 	/** Name of this adapter */
 	readonly name: string;
 
+	/** Geniigotchi provider name (for checkpointing) */
+	readonly modelProvider: string;
+
+	/** Geniigotchi model name/ID (for checkpointing) */
+	readonly modelName: string;
+
 	/**
 	 * Create a new agent instance.
 	 */
@@ -22,8 +28,10 @@ export interface AgentAdapter {
 
 	/**
 	 * Restore an agent instance from a checkpoint.
+	 * @param checkpoint - The checkpoint to restore from
+	 * @param config - Configuration for the restored agent (guidance, tools, etc.)
 	 */
-	restore(checkpoint: AgentCheckpoint): Promise<AgentInstance>;
+	restore(checkpoint: AgentCheckpoint, config: AdapterCreateConfig): Promise<AgentInstance>;
 }
 
 /**

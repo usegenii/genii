@@ -331,6 +331,8 @@ export interface DaemonClient {
 	listAgents(filter?: AgentListFilter): Promise<AgentSummary[]>;
 	getAgent(id: string): Promise<AgentDetails>;
 	spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }>;
+	continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }>;
+	listCheckpoints(): Promise<string[]>;
 	terminateAgent(id: string, reason?: string): Promise<void>;
 	pauseAgent(id: string): Promise<void>;
 	resumeAgent(id: string): Promise<void>;
@@ -565,6 +567,18 @@ class SocketDaemonClient implements DaemonClient {
 			...rest,
 			input: instruction ? { message: instruction } : undefined,
 		});
+	}
+
+	async continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }> {
+		return this._request('agent.continue', {
+			sessionId,
+			input: { message },
+			model,
+		});
+	}
+
+	async listCheckpoints(): Promise<string[]> {
+		return this._request('agent.listCheckpoints', {});
 	}
 
 	async terminateAgent(id: string, reason?: string): Promise<void> {

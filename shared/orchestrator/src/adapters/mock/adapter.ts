@@ -3,7 +3,7 @@
  */
 
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../../events/types';
-import { type AgentCheckpoint, CHECKPOINT_VERSION } from '../../snapshot/types';
+import type { AgentCheckpoint } from '../../snapshot/types';
 import type { AgentSessionId } from '../../types/core';
 import { generateAgentSessionId } from '../../types/core';
 import type { AdapterCreateConfig, AgentAdapter, AgentInstance, AgentInstanceStatus } from '../types';
@@ -37,7 +37,7 @@ export class MockAgentAdapter implements AgentAdapter {
 		return new MockAgentInstance(config, this.options);
 	}
 
-	async restore(_checkpoint: AgentCheckpoint): Promise<AgentInstance> {
+	async restore(_checkpoint: AgentCheckpoint, _config: AdapterCreateConfig): Promise<AgentInstance> {
 		// For testing, just create a new instance
 		// In a real adapter, this would restore from the checkpoint
 		throw new Error('Mock adapter does not support restore');
@@ -242,7 +242,6 @@ class MockAgentInstance implements AgentInstance {
 
 	async checkpoint(): Promise<AgentCheckpoint> {
 		return {
-			version: CHECKPOINT_VERSION,
 			timestamp: Date.now(),
 			adapterName: 'mock',
 			session: {
@@ -262,9 +261,10 @@ class MockAgentInstance implements AgentInstance {
 				memoryWrites: [],
 				systemState: {},
 			},
-			adapterState: {
-				inputQueue: this.inputQueue,
-				turnCount: this.turnCount,
+			messages: [],
+			adapterConfig: {
+				provider: 'mock',
+				model: 'mock-model',
 			},
 			toolExecutions: [],
 		};
