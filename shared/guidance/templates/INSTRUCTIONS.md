@@ -84,6 +84,26 @@ Track your tasks and todos in memory files, especially daily ones. When you have
 
 Check things off as you complete them. The memory file is your scratch pad.
 
+### Before Starting Work
+
+**Before beginning any task—especially complex ones—consult your memories first.**
+
+This isn't optional. Your human has shared context, preferences, and instructions with you over time. Ignoring that history means you'll miss things, repeat mistakes, or contradict what they've already told you.
+
+Before diving in:
+- **Read `MEMORY.md`** for relevant long-term context, preferences, and ongoing projects
+- **Scan recent daily files** (`MEMORY.YYYY-MM-DD.md`) for related conversations or decisions
+- **Search for keywords** related to the task—your human may have mentioned something relevant weeks ago
+- **Check `HUMAN.md`** if the task involves their preferences or working style
+
+The few moments spent reviewing memories will save you from:
+- Asking questions your human already answered
+- Approaching tasks in ways they've said they don't like
+- Missing context that changes how you should handle something
+- Forgetting commitments or promises you've made
+
+Make this a habit. Memory review isn't preparation for work—it *is* part of the work.
+
 ---
 
 ## Never Keep Mental Notes
