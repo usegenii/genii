@@ -25,6 +25,51 @@ import { checkpointToPiMessages, piMessagesToCheckpoint } from './messages';
 import type { PiAdapterOptions } from './types';
 
 /**
+ * Async event queue for streaming events from callbacks to async iterators.
+ * Allows pushing events from a synchronous callback and pulling them asynchronously.
+ */
+class AsyncEventQueue<T> {
+	private queue: T[] = [];
+	private waiters: Array<(item: T | null) => void> = [];
+	private closed = false;
+
+	/**
+	 * Push an event to the queue. If there are waiters, resolve the first one immediately.
+	 */
+	push(item: T): void {
+		if (this.closed) return;
+		if (this.waiters.length > 0) {
+			const resolve = this.waiters.shift()!;
+			resolve(item);
+		} else {
+			this.queue.push(item);
+		}
+	}
+
+	/**
+	 * Pull the next event from the queue. Returns null when the queue is closed and empty.
+	 */
+	async pull(): Promise<T | null> {
+		if (this.queue.length > 0) {
+			return this.queue.shift()!;
+		}
+		if (this.closed) return null;
+		return new Promise((resolve) => this.waiters.push(resolve));
+	}
+
+	/**
+	 * Close the queue. All pending waiters will receive null.
+	 */
+	close(): void {
+		this.closed = true;
+		for (const resolve of this.waiters) {
+			resolve(null);
+		}
+		this.waiters = [];
+	}
+}
+
+/**
  * Options for restoring an agent instance from a checkpoint.
  */
 export interface RestoreOptions {
@@ -171,15 +216,19 @@ export class PiAgentInstance implements AgentInstance {
 			// Process initial input
 			const initialInput = this.inputQueue.shift();
 			if (initialInput?.message) {
-				// Subscribe to events and yield them
-				const events: AgentEvent[] = [];
+				// Create async queue for streaming events in real-time
+				const eventQueue = new AsyncEventQueue<AgentEvent>();
+
+				// Subscribe to events and push them to the queue as they arrive
 				const unsubscribe = this.agent.subscribe((piEvent) => {
 					const mapped = mapPiEvent(piEvent, this.toolCallTimes);
 					if (mapped) {
 						if (Array.isArray(mapped)) {
-							events.push(...mapped);
+							for (const e of mapped) {
+								eventQueue.push(e);
+							}
 						} else {
-							events.push(mapped);
+							eventQueue.push(mapped);
 						}
 					}
 
@@ -189,45 +238,63 @@ export class PiAgentInstance implements AgentInstance {
 					}
 				});
 
-				try {
-					// Run the prompt
-					await this.agent.prompt(initialInput.message);
+				// Track any error from the prompt
+				let promptError: unknown = null;
 
-					// Yield collected events
-					for (const event of events) {
-						// Check for pause between events
-						if (this.pausePromise) {
-							yield {
-								type: 'status',
-								status: 'paused',
-								timestamp: Date.now(),
-							};
-							await this.pausePromise;
-							yield {
-								type: 'status',
-								status: 'running',
-								timestamp: Date.now(),
-							};
-						}
-						yield event;
-					}
+				// Run the prompt concurrently - close queue when done
+				const promptPromise = this.agent
+					.prompt(initialInput.message)
+					.catch((error) => {
+						promptError = error;
+					})
+					.finally(() => {
+						unsubscribe();
+						eventQueue.close();
+					});
 
-					// Check for pending suspensions
-					if (this.pendingRequests.length > 0) {
-						this._status = 'waiting';
+				// Yield events as they arrive from the queue
+				while (true) {
+					const event = await eventQueue.pull();
+					if (event === null) break;
+
+					// Check for pause between events
+					if (this.pausePromise) {
 						yield {
 							type: 'status',
-							status: 'waiting',
+							status: 'paused',
 							timestamp: Date.now(),
 						};
+						await this.pausePromise;
 						yield {
-							type: 'suspended',
-							pendingRequests: [...this.pendingRequests],
+							type: 'status',
+							status: 'running',
 							timestamp: Date.now(),
 						};
 					}
-				} finally {
-					unsubscribe();
+					yield event;
+				}
+
+				// Wait for prompt to fully complete
+				await promptPromise;
+
+				// Re-throw any error from the prompt
+				if (promptError) {
+					throw promptError;
+				}
+
+				// Check for pending suspensions
+				if (this.pendingRequests.length > 0) {
+					this._status = 'waiting';
+					yield {
+						type: 'status',
+						status: 'waiting',
+						timestamp: Date.now(),
+					};
+					yield {
+						type: 'suspended',
+						pendingRequests: [...this.pendingRequests],
+						timestamp: Date.now(),
+					};
 				}
 			}
 
