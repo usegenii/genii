@@ -225,8 +225,6 @@ export class MessageRouter implements MessageRouterInterface {
 			this._logger.debug({ agentId, result: event.result }, 'Agent done');
 		} else if (event.type === 'error') {
 			this._logger.debug({ agentId, error: event.error, fatal: event.fatal }, 'Agent error');
-		} else if (event.type === 'thought') {
-			this._logger.debug({ agentId, thought: event.content }, 'Agent thought');
 		}
 
 		// Get the conversation binding for this agent
