@@ -3,6 +3,7 @@
  */
 
 import type { Disposable } from '../types/core';
+import type { Logger } from '../types/logger';
 
 /**
  * Context for accessing guidance documents.
@@ -165,6 +166,8 @@ export interface MemorySystem {
 export interface GuidanceContextOptions {
 	/** Path to the guidance folder */
 	root: string;
+	/** Logger for guidance context events */
+	logger?: Logger;
 }
 
 /**

@@ -18,6 +18,7 @@ import type {
 	Disposable,
 	ShutdownOptions,
 } from '../types/core';
+import { type Logger, noopLogger } from '../types/logger';
 import type { ContinueConfig, Coordinator, CoordinatorConfig } from './types';
 
 /**
@@ -36,9 +37,11 @@ export class CoordinatorImpl implements Coordinator {
 	private agents = new Map<AgentSessionId, TrackedAgent>();
 	private emitter = new TypedEventEmitter<CoordinatorEvent>();
 	private _status: CoordinatorStatus = 'stopped';
+	private logger: Logger;
 
 	constructor(config: CoordinatorConfig) {
 		this.config = config;
+		this.logger = config.logger ?? noopLogger;
 	}
 
 	get status(): CoordinatorStatus {
@@ -103,7 +106,8 @@ export class CoordinatorImpl implements Coordinator {
 			throw new Error('No guidance path specified and no default configured');
 		}
 
-		const guidance = await createGuidanceContext({ root: guidancePath });
+		this.logger.debug({ guidancePath }, 'Creating guidance context for agent spawn');
+		const guidance = await createGuidanceContext({ root: guidancePath, logger: this.logger });
 
 		// Create instance via adapter
 		const instance = await adapter.create({
@@ -247,7 +251,8 @@ export class CoordinatorImpl implements Coordinator {
 		if (!guidancePath) {
 			throw new Error('No guidance path in checkpoint and no default configured');
 		}
-		const guidance = await createGuidanceContext({ root: guidancePath });
+		this.logger.debug({ guidancePath, sessionId }, 'Restoring guidance context from checkpoint');
+		const guidance = await createGuidanceContext({ root: guidancePath, logger: this.logger });
 
 		// Restore instance via adapter with new input
 		const instance = await adapter.restore(checkpoint, {

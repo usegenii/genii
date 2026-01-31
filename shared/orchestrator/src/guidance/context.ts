@@ -4,6 +4,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { type Logger, noopLogger } from '../types/logger';
 import { listSkills, listTasks, loadSkillBundle, loadTaskDocument } from './loaders';
 import { MemorySystemImpl } from './memory';
 import type {
@@ -26,9 +27,11 @@ export class GuidanceContextImpl implements GuidanceContext {
 	private _memory: MemorySystem | null = null;
 	private taskCache = new Map<string, TaskDocument | null>();
 	private skillCache = new Map<string, SkillBundle | null>();
+	private logger: Logger;
 
 	constructor(options: GuidanceContextOptions) {
 		this.root = options.root;
+		this.logger = options.logger ?? noopLogger;
 	}
 
 	/**
@@ -67,10 +70,23 @@ export class GuidanceContextImpl implements GuidanceContext {
 	 * Initialize the context by loading SOUL.md and INSTRUCTIONS.md.
 	 */
 	async initialize(): Promise<void> {
+		this.logger.debug({ root: this.root }, 'Initializing guidance context');
+
 		const [soul, instructions] = await Promise.all([this.loadFile('SOUL.md'), this.loadFile('INSTRUCTIONS.md')]);
 
 		this._soul = soul ?? '';
 		this._instructions = instructions ?? '';
+
+		this.logger.info(
+			{
+				root: this.root,
+				soulLoaded: soul !== null,
+				soulLength: this._soul.length,
+				instructionsLoaded: instructions !== null,
+				instructionsLength: this._instructions.length,
+			},
+			'Guidance context initialized',
+		);
 	}
 
 	/**

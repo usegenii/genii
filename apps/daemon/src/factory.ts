@@ -198,19 +198,23 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 
 	// Create logger
 	const logger = createLogger({ level: logLevel });
-	logger.info({ config: { socketPath, dataPath, logLevel } }, 'Creating daemon');
+
+	// Resolve guidance path early so we can log it
+	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
+
+	logger.info({ config: { socketPath, dataPath, guidancePath, logLevel } }, 'Creating daemon');
 
 	// Create shutdown manager
 	const shutdownManager = new ShutdownManager(logger);
 
-	// Create real coordinator with guidance directory and snapshot store
-	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
+	// Create coordinator with guidance directory and snapshot store
 	const snapshotPath = join(dataPath, 'snapshots');
 	const snapshotStore = createFileSnapshotStore({ directory: snapshotPath });
 
 	const coordinator = createCoordinator({
 		defaultGuidancePath: guidancePath,
 		snapshotStore,
+		logger,
 	});
 
 	// Use provided channel registry or create a placeholder
@@ -348,11 +352,15 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	// Use provided logger or create one
 	const logger = options.logger ?? createLogger({ level: logLevel });
 
+	// Resolve guidance path early so we can log it
+	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
+
+	logger.info({ config: { socketPath, dataPath, guidancePath, logLevel } }, 'Creating daemon with deps');
+
 	// Create shutdown manager
 	const shutdownManager = new ShutdownManager(logger);
 
-	// Resolve guidance directory and snapshot directory
-	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
+	// Create or use provided coordinator with snapshot store
 	const snapshotPath = join(dataPath, 'snapshots');
 	const snapshotStore = options.snapshotStore ?? createFileSnapshotStore({ directory: snapshotPath });
 
@@ -362,6 +370,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		createCoordinator({
 			defaultGuidancePath: guidancePath,
 			snapshotStore,
+			logger,
 		});
 	const channelRegistry = options.channelRegistry ?? createPlaceholderChannelRegistry();
 

@@ -16,6 +16,7 @@ import type {
 	Disposable,
 	ShutdownOptions,
 } from '../types/core';
+import type { Logger } from '../types/logger';
 
 /**
  * Configuration for continuing a session.
@@ -105,4 +106,6 @@ export interface CoordinatorConfig {
 	snapshotStore?: SnapshotStore;
 	/** Default guidance path if not specified in spawn config */
 	defaultGuidancePath?: string;
+	/** Logger for coordinator events */
+	logger?: Logger;
 }
