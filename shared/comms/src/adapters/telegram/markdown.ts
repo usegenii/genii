@@ -56,9 +56,21 @@ function sanitizeForTelegram(html: string): string {
 
 		// Unwrap tags - remove tag but keep content
 		if (UNWRAP_TAGS.has(tag)) {
-			// For list items, add bullet point
+			// Paragraphs get blank line after
+			if (tag === 'p') {
+				return closeTag ? '\n\n' : '';
+			}
+			// Headings get blank line after
+			if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') {
+				return closeTag ? '\n\n' : '';
+			}
+			// List items get bullet point
 			if (tag === 'li') {
 				return closeTag ? '\n' : '\u2022 ';
+			}
+			// Lists get blank line after
+			if (tag === 'ul' || tag === 'ol') {
+				return closeTag ? '\n' : '';
 			}
 			return '';
 		}
