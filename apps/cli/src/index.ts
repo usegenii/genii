@@ -11,6 +11,7 @@ import { registerConfigCommands } from './commands/config/show';
 import { registerConversationCommands } from './commands/conversation/list';
 import { registerDaemonCommands } from './commands/daemon/start';
 import { registerOnboardCommand } from './commands/onboard';
+import { registerPulseCommand } from './commands/pulse';
 import { tuiCommand } from './commands/tui';
 
 export const program = new Command();
@@ -32,6 +33,7 @@ registerConfigCommands(program);
 
 // Top-level commands
 registerOnboardCommand(program);
+registerPulseCommand(program);
 
 // TUI command
 program.addCommand(tuiCommand);

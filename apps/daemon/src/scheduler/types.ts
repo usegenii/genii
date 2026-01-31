@@ -43,6 +43,18 @@ export interface RegisteredJob {
 }
 
 /**
+ * Information about a registered job.
+ */
+export interface JobInfo {
+	/** Job name */
+	name: string;
+	/** Cron schedule expression */
+	schedule: string;
+	/** Next scheduled run time, or null if not scheduled */
+	nextRun: Date | null;
+}
+
+/**
  * Scheduler lifecycle interface.
  */
 export interface SchedulerLifecycle {
@@ -55,6 +67,18 @@ export interface SchedulerLifecycle {
 	 * Stop the scheduler and all running jobs.
 	 */
 	stop(): Promise<void>;
+
+	/**
+	 * Trigger a job immediately by name.
+	 * @param name - Name of the job to trigger
+	 * @throws Error if job not found or execution fails
+	 */
+	triggerJob(name: string): Promise<void>;
+
+	/**
+	 * List all registered jobs with their schedules and next run times.
+	 */
+	listJobs(): JobInfo[];
 
 	/**
 	 * Check if the scheduler is running.

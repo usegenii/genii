@@ -7,7 +7,7 @@
 
 import { Cron } from 'croner';
 import type { Logger } from '../logging/logger';
-import type { RegisteredJob, ScheduledJob, SchedulerLifecycle, SchedulerOptions } from './types';
+import type { JobInfo, RegisteredJob, ScheduledJob, SchedulerLifecycle, SchedulerOptions } from './types';
 
 /**
  * Scheduler implementation using croner.
@@ -137,6 +137,38 @@ export class Scheduler implements SchedulerLifecycle {
 			return null;
 		}
 		return registered.cron.nextRun();
+	}
+
+	/**
+	 * Trigger a job immediately by name.
+	 *
+	 * @param name - Name of the job to trigger
+	 * @throws Error if job not found or execution fails
+	 */
+	async triggerJob(name: string): Promise<void> {
+		const registered = this._jobs.get(name);
+		if (!registered) {
+			const available = this.jobNames.join(', ') || '(none)';
+			throw new Error(`Job '${name}' not found. Available jobs: ${available}`);
+		}
+
+		this._logger.info({ jobName: name }, 'Manually triggering job');
+		await registered.job.execute();
+	}
+
+	/**
+	 * List all registered jobs with their schedules and next run times.
+	 */
+	listJobs(): JobInfo[] {
+		const jobs: JobInfo[] = [];
+		for (const [name, registered] of this._jobs) {
+			jobs.push({
+				name,
+				schedule: registered.schedule,
+				nextRun: registered.cron.nextRun(),
+			});
+		}
+		return jobs;
 	}
 
 	/**

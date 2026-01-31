@@ -16,6 +16,7 @@ import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { resolveDefaultModel } from '../models/resolve';
 import { executeOnboard, getOnboardStatus } from '../onboard';
+import type { SchedulerLifecycle } from '../scheduler/types';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
 import type { TransportConnection } from '../transport/types';
 import type {
@@ -32,6 +33,7 @@ import type {
 	RpcMethodName,
 	RpcMethodResults,
 	RpcMethods,
+	SchedulerJobInfo,
 } from './methods';
 import type { SubscriptionManager } from './subscriptions';
 
@@ -73,6 +75,8 @@ export interface RpcHandlerContext {
 	appConfig?: Config;
 	/** Tool registry for agents */
 	toolRegistry?: ToolRegistryInterface;
+	/** Scheduler for triggering jobs (optional for backward compat) */
+	scheduler?: SchedulerLifecycle;
 }
 
 /**
@@ -182,6 +186,12 @@ export function createHandlers(
 	handlers.set('onboard.status', (_params, ctx) => handleOnboardStatus(ctx));
 	handlers.set('onboard.execute', (params, ctx) =>
 		handleOnboardExecute(params as RpcMethods['onboard.execute'], ctx),
+	);
+
+	// Scheduler methods
+	handlers.set('scheduler.list', (_params, ctx) => handleSchedulerList(ctx));
+	handlers.set('scheduler.trigger', (params, ctx) =>
+		handleSchedulerTrigger(params as RpcMethods['scheduler.trigger'], ctx),
 	);
 
 	return handlers;
@@ -715,4 +725,51 @@ async function handleOnboardExecute(
 			dryRun: params.dryRun,
 		},
 	);
+}
+
+// =============================================================================
+// Scheduler Handlers
+// =============================================================================
+
+async function handleSchedulerList(context: RpcHandlerContext): Promise<RpcMethodResults['scheduler.list']> {
+	const { scheduler } = context;
+
+	if (!scheduler) {
+		return { jobs: [] };
+	}
+
+	const jobs = scheduler.listJobs();
+	const result: SchedulerJobInfo[] = jobs.map((job) => ({
+		name: job.name,
+		schedule: job.schedule,
+		nextRun: job.nextRun?.toISOString() ?? null,
+	}));
+
+	return { jobs: result };
+}
+
+async function handleSchedulerTrigger(
+	params: RpcMethods['scheduler.trigger'],
+	context: RpcHandlerContext,
+): Promise<RpcMethodResults['scheduler.trigger']> {
+	const { scheduler, logger } = context;
+
+	if (!scheduler) {
+		throw new Error('Scheduler not configured');
+	}
+
+	logger.info({ job: params.job }, 'Triggering job via RPC');
+
+	try {
+		await scheduler.triggerJob(params.job);
+		return { triggered: true };
+	} catch (error) {
+		// Re-throw with more context
+		if (error instanceof Error && error.message.includes('not found')) {
+			throw error; // Already descriptive "job not found" error
+		}
+		// Execution failure
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Job '${params.job}' execution failed: ${message}`);
+	}
 }

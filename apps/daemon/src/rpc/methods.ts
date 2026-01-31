@@ -175,6 +175,22 @@ export interface OnboardResult {
 }
 
 // =============================================================================
+// Scheduler Types
+// =============================================================================
+
+/**
+ * Information about a scheduled job.
+ */
+export interface SchedulerJobInfo {
+	/** Job name */
+	name: string;
+	/** Cron schedule expression */
+	schedule: string;
+	/** Next scheduled run time (ISO string), or null if not scheduled */
+	nextRun: string | null;
+}
+
+// =============================================================================
 // RPC Method Names
 // =============================================================================
 
@@ -219,7 +235,10 @@ export type RpcMethodName =
 	| 'config.validate'
 	// Onboard methods
 	| 'onboard.status'
-	| 'onboard.execute';
+	| 'onboard.execute'
+	// Scheduler methods
+	| 'scheduler.list'
+	| 'scheduler.trigger';
 
 // =============================================================================
 // RPC Method Parameters
@@ -338,6 +357,13 @@ export interface RpcMethods {
 		/** Only report what would be done, don't actually copy */
 		dryRun: boolean;
 	};
+
+	// Scheduler methods
+	'scheduler.list': Record<string, never>;
+	'scheduler.trigger': {
+		/** Name of the job to trigger */
+		job: string;
+	};
 }
 
 // =============================================================================
@@ -392,4 +418,8 @@ export interface RpcMethodResults {
 	// Onboard methods
 	'onboard.status': OnboardStatus;
 	'onboard.execute': OnboardResult;
+
+	// Scheduler methods
+	'scheduler.list': { jobs: SchedulerJobInfo[] };
+	'scheduler.trigger': { triggered: true };
 }

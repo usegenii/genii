@@ -220,6 +220,22 @@ export interface OnboardExecuteOptions {
 }
 
 // =============================================================================
+// Scheduler Types
+// =============================================================================
+
+/**
+ * Information about a scheduled job.
+ */
+export interface SchedulerJobInfo {
+	/** Job name */
+	name: string;
+	/** Cron schedule expression */
+	schedule: string;
+	/** Next scheduled run time (ISO string), or null if not scheduled */
+	nextRun: string | null;
+}
+
+// =============================================================================
 // Line Decoder (for socket communication)
 // =============================================================================
 
@@ -396,6 +412,10 @@ export interface DaemonClient {
 	// Onboard methods
 	onboardStatus(): Promise<OnboardStatus>;
 	onboardExecute(options: OnboardExecuteOptions): Promise<OnboardResult>;
+
+	// Scheduler methods
+	listSchedulerJobs(): Promise<SchedulerJobInfo[]>;
+	triggerJob(name: string): Promise<void>;
 
 	// Subscriptions
 	subscribe(type: string, filter?: unknown): Promise<string>;
@@ -705,6 +725,19 @@ class SocketDaemonClient implements DaemonClient {
 
 	async onboardExecute(options: OnboardExecuteOptions): Promise<OnboardResult> {
 		return this._request('onboard.execute', options);
+	}
+
+	// =========================================================================
+	// Scheduler Methods
+	// =========================================================================
+
+	async listSchedulerJobs(): Promise<SchedulerJobInfo[]> {
+		const result = await this._request<{ jobs: SchedulerJobInfo[] }>('scheduler.list');
+		return result.jobs;
+	}
+
+	async triggerJob(name: string): Promise<void> {
+		await this._request('scheduler.trigger', { job: name });
 	}
 
 	// =========================================================================

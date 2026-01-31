@@ -131,6 +131,7 @@ interface CreateRpcServerDepsConfig {
 	modelFactory?: ModelFactory;
 	appConfig?: Config;
 	toolRegistry?: ToolRegistryInterface;
+	scheduler?: ReturnType<typeof createScheduler>;
 }
 
 /**
@@ -161,6 +162,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		modelFactory: deps.modelFactory,
 		appConfig: deps.appConfig,
 		toolRegistry: deps.toolRegistry,
+		scheduler: deps.scheduler,
 	};
 
 	// Create handlers
@@ -374,6 +376,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
 		toolRegistry,
+		scheduler,
 	});
 
 	// Create and return daemon instance
@@ -590,6 +593,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
 		toolRegistry,
+		scheduler,
 	});
 
 	// Create and return daemon instance
