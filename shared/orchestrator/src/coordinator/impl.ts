@@ -8,6 +8,7 @@ import type { ContextInjection } from '../context-injectors/types';
 import { TypedEventEmitter } from '../events/emitter';
 import type { CoordinatorEvent } from '../events/types';
 import { createGuidanceContext } from '../guidance/context';
+import type { GuidanceContext } from '../guidance/types';
 import { type AgentHandleImpl, createAgentHandle } from '../handle/impl';
 import type { AgentHandle } from '../handle/types';
 import { createSkillsLoader } from '../skills/loader';
@@ -57,9 +58,15 @@ export class CoordinatorImpl implements Coordinator {
 	/**
 	 * Collect system context from registered injectors for new sessions.
 	 * @param sessionId - The agent session ID
+	 * @param guidance - The guidance context
+	 * @param skills - Loaded skills
 	 * @returns System context string, or undefined if no registry/context
 	 */
-	private collectSystemContext(sessionId: string): string | undefined {
+	private async collectSystemContext(
+		sessionId: string,
+		guidance: GuidanceContext,
+		skills: LoadedSkill[],
+	): Promise<string | undefined> {
 		if (!this.contextInjectorRegistry) {
 			return undefined;
 		}
@@ -68,9 +75,12 @@ export class CoordinatorImpl implements Coordinator {
 			timezone: this.timezone,
 			now: new Date(),
 			sessionId,
+			guidance,
+			skills,
+			guidancePath: guidance.root,
 		};
 
-		const systemContext = this.contextInjectorRegistry.collectSystemContext(ctx);
+		const systemContext = await this.contextInjectorRegistry.collectSystemContext(ctx);
 
 		if (systemContext) {
 			this.logger.debug({ sessionId, hasSystemContext: true }, 'Collected system context');
@@ -82,9 +92,15 @@ export class CoordinatorImpl implements Coordinator {
 	/**
 	 * Collect resume context from registered injectors for continued sessions.
 	 * @param sessionId - The agent session ID
+	 * @param guidance - The guidance context
+	 * @param skills - Loaded skills
 	 * @returns Context injection with resumeMessages, or undefined if no registry/context
 	 */
-	private collectResumeContext(sessionId: string): ContextInjection | undefined {
+	private collectResumeContext(
+		sessionId: string,
+		guidance: GuidanceContext,
+		skills: LoadedSkill[],
+	): ContextInjection | undefined {
 		if (!this.contextInjectorRegistry) {
 			return undefined;
 		}
@@ -93,6 +109,9 @@ export class CoordinatorImpl implements Coordinator {
 			timezone: this.timezone,
 			now: new Date(),
 			sessionId,
+			guidance,
+			skills,
+			guidancePath: guidance.root,
 		};
 
 		const resumeMessages = this.contextInjectorRegistry.collectResumeContext(ctx);
@@ -164,10 +183,6 @@ export class CoordinatorImpl implements Coordinator {
 		// Generate session ID upfront for context injection
 		const sessionId = generateAgentSessionId();
 
-		// Collect system context for new spawn
-		const systemContext = this.collectSystemContext(sessionId);
-		const contextInjection: ContextInjection | undefined = systemContext ? { systemContext } : undefined;
-
 		// Create guidance context
 		const guidancePath = config.guidancePath ?? this.config.defaultGuidancePath;
 		if (!guidancePath) {
@@ -195,6 +210,10 @@ export class CoordinatorImpl implements Coordinator {
 				'Skills loaded for agent spawn',
 			);
 		}
+
+		// Collect system context for new spawn (needs guidance and skills)
+		const systemContext = await this.collectSystemContext(sessionId, guidance, skills);
+		const contextInjection: ContextInjection | undefined = systemContext ? { systemContext } : undefined;
 
 		// Create instance via adapter
 		const instance = await adapter.create({
@@ -335,9 +354,6 @@ export class CoordinatorImpl implements Coordinator {
 			throw new Error(`Checkpoint not found for session: ${sessionId}`);
 		}
 
-		// Collect resume context for continued session
-		const contextInjection = this.collectResumeContext(sessionId);
-
 		// Create guidance context from checkpoint
 		const guidancePath = checkpoint.guidance.guidancePath ?? this.config.defaultGuidancePath;
 		if (!guidancePath) {
@@ -364,6 +380,9 @@ export class CoordinatorImpl implements Coordinator {
 				'Skills loaded for session continue',
 			);
 		}
+
+		// Collect resume context for continued session (needs guidance and skills)
+		const contextInjection = this.collectResumeContext(sessionId, guidance, skills);
 
 		// Restore instance via adapter with new input
 		const instance = await adapter.restore(checkpoint, {

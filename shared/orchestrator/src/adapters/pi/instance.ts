@@ -533,9 +533,15 @@ export async function createPiAgentInstance(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt with skills and injected context
-	const systemContext = config.contextInjection?.systemContext;
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, systemContext);
+	// Use injected system context directly if provided (new injector-based approach)
+	// Fall back to deprecated buildSystemPromptWithTask for backwards compatibility
+	let systemPrompt: string;
+	if (config.contextInjection?.systemContext) {
+		systemPrompt = config.contextInjection.systemContext;
+	} else {
+		// Deprecated: Build system prompt manually when no injected context is provided
+		systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, undefined);
+	}
 
 	return new PiAgentInstance(config, model, systemPrompt, {
 		apiKey: options.apiKey,
@@ -598,9 +604,16 @@ export async function createPiAgentInstanceFromCheckpoint(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt with skills and injected context
-	const systemContext = config.contextInjection?.systemContext;
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, systemContext);
+	// Use injected system context directly if provided (new injector-based approach)
+	// Fall back to deprecated buildSystemPromptWithTask for backwards compatibility
+	// Note: For resume/continue, we typically rebuild the system prompt fresh
+	let systemPrompt: string;
+	if (config.contextInjection?.systemContext) {
+		systemPrompt = config.contextInjection.systemContext;
+	} else {
+		// Deprecated: Build system prompt manually when no injected context is provided
+		systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills, undefined);
+	}
 
 	// Create restore options from checkpoint
 	const restoreOptions: RestoreOptions = {

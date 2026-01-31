@@ -5,6 +5,9 @@
 import { type Logger, noopLogger } from '../types/logger.js';
 import type { ContextInjection, ContextInjector, InjectorContext } from './types';
 
+/** Default separator between injected context sections */
+const DEFAULT_SEPARATOR = '\n\n---\n\n';
+
 /**
  * Options for creating a context injector registry.
  */
@@ -33,7 +36,10 @@ export class ContextInjectorRegistry {
 			throw new Error(`Context injector "${injector.name}" is already registered`);
 		}
 		this.injectors.set(injector.name, injector);
-		this.logger.info({ injector: injector.name }, `Registered context injector: ${injector.name}`);
+		this.logger.info(
+			{ injector: injector.name, order: injector.order },
+			`Registered context injector: ${injector.name} (order: ${injector.order})`,
+		);
 	}
 
 	/**
@@ -44,10 +50,17 @@ export class ContextInjectorRegistry {
 	}
 
 	/**
-	 * Get all registered injectors.
+	 * Get all registered injectors (unsorted).
 	 */
 	all(): ContextInjector[] {
 		return [...this.injectors.values()];
+	}
+
+	/**
+	 * Get all registered injectors sorted by order.
+	 */
+	allSorted(): ContextInjector[] {
+		return [...this.injectors.values()].sort((a, b) => a.order - b.order);
 	}
 
 	/**
@@ -73,16 +86,20 @@ export class ContextInjectorRegistry {
 
 	/**
 	 * Collect system context from all registered injectors.
-	 * Combines systemContext strings with double newlines.
-	 * @param ctx - The injector context (without isResume flag)
+	 * Injectors are sorted by order before collecting.
+	 * Combines systemContext strings with the specified separator.
+	 * @param ctx - The injector context
+	 * @param separator - Separator between context sections (default: '\n\n---\n\n')
 	 * @returns Combined system context string, or undefined if none
 	 */
-	collectSystemContext(ctx: InjectorContext): string | undefined {
+	async collectSystemContext(ctx: InjectorContext, separator = DEFAULT_SEPARATOR): Promise<string | undefined> {
 		const systemContextParts: string[] = [];
+		const sorted = this.allSorted();
 
-		for (const injector of this.injectors.values()) {
+		for (const injector of sorted) {
 			try {
-				const context = injector.injectSystemContext(ctx);
+				const result = injector.injectSystemContext(ctx);
+				const context = result instanceof Promise ? await result : result;
 				if (context) {
 					systemContextParts.push(context);
 				}
@@ -94,19 +111,21 @@ export class ContextInjectorRegistry {
 			}
 		}
 
-		return systemContextParts.length > 0 ? systemContextParts.join('\n\n') : undefined;
+		return systemContextParts.length > 0 ? systemContextParts.join(separator) : undefined;
 	}
 
 	/**
 	 * Collect resume messages from all registered injectors.
+	 * Injectors are sorted by order before collecting.
 	 * Concatenates all resume messages arrays.
-	 * @param ctx - The injector context (without isResume flag)
+	 * @param ctx - The injector context
 	 * @returns Combined resume messages array, or undefined if none
 	 */
 	collectResumeContext(ctx: InjectorContext): ContextInjection['resumeMessages'] {
 		const allResumeMessages: NonNullable<ContextInjection['resumeMessages']> = [];
+		const sorted = this.allSorted();
 
-		for (const injector of this.injectors.values()) {
+		for (const injector of sorted) {
 			try {
 				const messages = injector.injectResumeContext(ctx);
 				if (messages && messages.length > 0) {
@@ -128,13 +147,13 @@ export class ContextInjectorRegistry {
 	 * @deprecated Use collectSystemContext or collectResumeContext instead
 	 * Combines systemContext strings with newlines and concatenates resumeMessages arrays.
 	 */
-	collect(ctx: InjectorContext & { isResume: boolean }): ContextInjection {
+	async collect(ctx: InjectorContext & { isResume: boolean }): Promise<ContextInjection> {
 		const result: ContextInjection = {};
 
 		if (ctx.isResume) {
 			result.resumeMessages = this.collectResumeContext(ctx);
 		} else {
-			result.systemContext = this.collectSystemContext(ctx);
+			result.systemContext = await this.collectSystemContext(ctx);
 		}
 
 		return result;

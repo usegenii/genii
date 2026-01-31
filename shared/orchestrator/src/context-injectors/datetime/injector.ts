@@ -5,6 +5,7 @@
  */
 
 import type { CheckpointMessage } from '../../snapshot/types';
+import { INJECTOR_ORDER } from '../order';
 import type { ContextInjector, InjectorContext } from '../types';
 import { formatDateTime } from './format';
 
@@ -16,6 +17,7 @@ import { formatDateTime } from './format';
  */
 export class DateTimeContextInjector implements ContextInjector {
 	readonly name = 'datetime';
+	readonly order = INJECTOR_ORDER.DATETIME;
 
 	/**
 	 * Inject system context with the current date and time.

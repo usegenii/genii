@@ -114,6 +114,7 @@ export async function listTasks(tasksDir: string): Promise<TaskInfo[]> {
 				tasks.push({
 					id: doc.id,
 					title: doc.title,
+					description: doc.metadata?.description as string | undefined,
 					path,
 				});
 			}

@@ -13,7 +13,12 @@ import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Config } from '@geniigotchi/config/config';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import { DateTimeContextInjector } from '@geniigotchi/orchestrator/context-injectors/datetime/injector';
+import { InstructionsContextInjector } from '@geniigotchi/orchestrator/context-injectors/instructions/injector';
+import { MemoriesPathContextInjector } from '@geniigotchi/orchestrator/context-injectors/memories-path/injector';
 import { ContextInjectorRegistry } from '@geniigotchi/orchestrator/context-injectors/registry';
+import { SkillsContextInjector } from '@geniigotchi/orchestrator/context-injectors/skills/injector';
+import { SoulContextInjector } from '@geniigotchi/orchestrator/context-injectors/soul/injector';
+import { TasksContextInjector } from '@geniigotchi/orchestrator/context-injectors/tasks/injector';
 import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import { createFileSnapshotStore } from '@geniigotchi/orchestrator/snapshot/store';
@@ -215,9 +220,14 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = createFileSnapshotStore({ directory: snapshotPath });
 
-	// Create and configure context injector registry
+	// Create and configure context injector registry with all injectors
 	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
+	contextInjectorRegistry.register(new SoulContextInjector());
+	contextInjectorRegistry.register(new InstructionsContextInjector());
+	contextInjectorRegistry.register(new SkillsContextInjector());
+	contextInjectorRegistry.register(new MemoriesPathContextInjector());
 	contextInjectorRegistry.register(new DateTimeContextInjector());
+	contextInjectorRegistry.register(new TasksContextInjector());
 
 	// Resolve timezone from preferences or system default
 	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -383,9 +393,14 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = options.snapshotStore ?? createFileSnapshotStore({ directory: snapshotPath });
 
-	// Create and configure context injector registry
+	// Create and configure context injector registry with all injectors
 	const contextInjectorRegistry = new ContextInjectorRegistry({ logger });
+	contextInjectorRegistry.register(new SoulContextInjector());
+	contextInjectorRegistry.register(new InstructionsContextInjector());
+	contextInjectorRegistry.register(new SkillsContextInjector());
+	contextInjectorRegistry.register(new MemoriesPathContextInjector());
 	contextInjectorRegistry.register(new DateTimeContextInjector());
+	contextInjectorRegistry.register(new TasksContextInjector());
 
 	// Resolve timezone from preferences or system default
 	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;

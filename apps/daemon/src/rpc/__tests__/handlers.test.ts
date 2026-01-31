@@ -8,6 +8,7 @@ import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import type { AgentHandle } from '@geniigotchi/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@geniigotchi/orchestrator/snapshot/types';
 import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
+import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
 import type { Logger } from '../../logging/logger';
@@ -81,21 +82,20 @@ function createMockCheckpoint(sessionId: string): AgentCheckpoint {
 		timestamp: Date.now(),
 		adapterName: 'mock-adapter',
 		session: {
-			id: sessionId,
+			id: sessionId as AgentSessionId,
 			createdAt: Date.now(),
 			tags: [],
 			metadata: {},
 			metrics: {
-				inputTokens: 0,
-				outputTokens: 0,
-				totalTokens: 0,
+				durationMs: 0,
+				turns: 0,
+				toolCalls: 0,
 			},
 		},
 		guidance: {
-			type: 'embedded',
-			soul: null,
-			instructions: null,
-			memory: null,
+			guidancePath: '/test/guidance',
+			memoryWrites: [],
+			systemState: {},
 		},
 		messages: [],
 		adapterConfig: {

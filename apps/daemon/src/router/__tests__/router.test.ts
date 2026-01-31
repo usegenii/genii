@@ -7,11 +7,11 @@ import type { InboundEvent } from '@geniigotchi/comms/events/types';
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { ChannelId } from '@geniigotchi/comms/types/core';
 import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
-import type { ContinueConfig, Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
+import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import type { AgentHandle } from '@geniigotchi/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@geniigotchi/orchestrator/snapshot/types';
 import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
-import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@geniigotchi/orchestrator/types/core';
+import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
 import type { ConversationBinding } from '../../conversations/types';
@@ -97,9 +97,9 @@ function createMockCoordinator(): Coordinator & {
 	spawnMock: ReturnType<typeof vi.fn>;
 	loadCheckpointMock: ReturnType<typeof vi.fn>;
 } {
-	const continueMock = vi.fn<[AgentSessionId, AgentInput, AgentAdapter, ContinueConfig?], Promise<AgentHandle>>();
-	const spawnMock = vi.fn<[AgentAdapter, AgentSpawnConfig], Promise<AgentHandle>>();
-	const loadCheckpointMock = vi.fn<[AgentSessionId], Promise<AgentCheckpoint | null>>();
+	const continueMock = vi.fn();
+	const spawnMock = vi.fn();
+	const loadCheckpointMock = vi.fn();
 
 	return {
 		start: vi.fn().mockResolvedValue(undefined),
@@ -204,8 +204,8 @@ function createMockConversationManager(): ConversationManager {
 function createMockAdapter(): AgentAdapter {
 	return {
 		name: 'mock-adapter',
-		provider: 'mock',
-		model: 'mock-model',
+		modelProvider: 'mock',
+		modelName: 'mock-model',
 		create: vi.fn(),
 		restore: vi.fn(),
 	};
@@ -401,7 +401,9 @@ describe('MessageRouter', () => {
 					metrics: { durationMs: 0, turns: 0, toolCalls: 0 },
 				},
 				guidance: {
-					memories: [],
+					guidancePath: '/test/guidance',
+					memoryWrites: [],
+					systemState: {},
 				},
 				messages: [],
 				adapterConfig: {
@@ -520,7 +522,9 @@ describe('MessageRouter', () => {
 					metrics: { durationMs: 0, turns: 0, toolCalls: 0 },
 				},
 				guidance: {
-					memories: [],
+					guidancePath: '/test/guidance',
+					memoryWrites: [],
+					systemState: {},
 				},
 				messages: [],
 				adapterConfig: {

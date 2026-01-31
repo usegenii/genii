@@ -64,6 +64,8 @@ export interface TaskInfo {
 	id: string;
 	/** Task title */
 	title: string;
+	/** Short description of the task (from frontmatter) */
+	description?: string;
 	/** Path to the task file */
 	path: string;
 }

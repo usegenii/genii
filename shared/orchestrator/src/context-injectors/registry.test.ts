@@ -8,12 +8,14 @@ import { createContextInjectorRegistry } from './registry';
 import type { ContextInjection, ContextInjector, InjectorContext } from './types';
 
 // Helper to create a mock injector
+let mockInjectorOrder = 0;
 function createMockInjector(
 	name: string,
-	options: { systemContext?: string; resumeMessages?: ContextInjection['resumeMessages'] } = {},
+	options: { systemContext?: string; resumeMessages?: ContextInjection['resumeMessages']; order?: number } = {},
 ): ContextInjector {
 	return {
 		name,
+		order: options.order ?? mockInjectorOrder++,
 		injectSystemContext: vi.fn(() => options.systemContext),
 		injectResumeContext: vi.fn(() => options.resumeMessages),
 	};
@@ -69,13 +71,13 @@ describe('ContextInjectorRegistry', () => {
 				child: vi.fn(() => mockLogger),
 			};
 			const registry = createContextInjectorRegistry({ logger: mockLogger });
-			const injector = createMockInjector('test-injector');
+			const injector = createMockInjector('test-injector', { order: 100 });
 
 			registry.register(injector);
 
 			expect(mockLogger.info).toHaveBeenCalledWith(
-				{ injector: 'test-injector' },
-				'Registered context injector: test-injector',
+				{ injector: 'test-injector', order: 100 },
+				'Registered context injector: test-injector (order: 100)',
 			);
 		});
 	});
@@ -149,16 +151,16 @@ describe('ContextInjectorRegistry', () => {
 	});
 
 	describe('collectSystemContext', () => {
-		it('should return undefined from empty registry', () => {
+		it('should return undefined from empty registry', async () => {
 			const registry = createContextInjectorRegistry();
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
 			expect(result).toBeUndefined();
 		});
 
-		it('should collect from a single injector', () => {
+		it('should collect from a single injector', async () => {
 			const registry = createContextInjectorRegistry();
 			const injector = createMockInjector('test', {
 				systemContext: 'Test context',
@@ -166,48 +168,50 @@ describe('ContextInjectorRegistry', () => {
 			registry.register(injector);
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
 			expect(result).toBe('Test context');
 			expect(injector.injectSystemContext).toHaveBeenCalledWith(ctx);
 		});
 
-		it('should collect from multiple injectors', () => {
+		it('should collect from multiple injectors', async () => {
 			const registry = createContextInjectorRegistry();
-			registry.register(createMockInjector('injector1', { systemContext: 'Context 1' }));
-			registry.register(createMockInjector('injector2', { systemContext: 'Context 2' }));
+			registry.register(createMockInjector('injector1', { systemContext: 'Context 1', order: 0 }));
+			registry.register(createMockInjector('injector2', { systemContext: 'Context 2', order: 1 }));
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
 			expect(result).toBeDefined();
 		});
 
-		it('should merge systemContext from multiple injectors with double newlines', () => {
+		it('should merge systemContext from multiple injectors sorted by order', async () => {
 			const registry = createContextInjectorRegistry();
-			registry.register(createMockInjector('injector1', { systemContext: 'First context' }));
-			registry.register(createMockInjector('injector2', { systemContext: 'Second context' }));
-			registry.register(createMockInjector('injector3', { systemContext: 'Third context' }));
+			// Register out of order to verify sorting
+			registry.register(createMockInjector('injector2', { systemContext: 'Second context', order: 100 }));
+			registry.register(createMockInjector('injector1', { systemContext: 'First context', order: 0 }));
+			registry.register(createMockInjector('injector3', { systemContext: 'Third context', order: 200 }));
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
-			expect(result).toBe('First context\n\nSecond context\n\nThird context');
+			// Should be sorted by order with default separator
+			expect(result).toBe('First context\n\n---\n\nSecond context\n\n---\n\nThird context');
 		});
 
-		it('should skip empty systemContext values', () => {
+		it('should skip empty systemContext values', async () => {
 			const registry = createContextInjectorRegistry();
-			registry.register(createMockInjector('injector1', { systemContext: 'First' }));
-			registry.register(createMockInjector('injector2', {})); // No systemContext
-			registry.register(createMockInjector('injector3', { systemContext: 'Third' }));
+			registry.register(createMockInjector('injector1', { systemContext: 'First', order: 0 }));
+			registry.register(createMockInjector('injector2', { order: 1 })); // No systemContext
+			registry.register(createMockInjector('injector3', { systemContext: 'Third', order: 2 }));
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
-			expect(result).toBe('First\n\nThird');
+			expect(result).toBe('First\n\n---\n\nThird');
 		});
 
-		it('should handle injector errors gracefully', () => {
+		it('should handle injector errors gracefully', async () => {
 			const mockLogger: Logger = {
 				debug: vi.fn(),
 				info: vi.fn(),
@@ -219,16 +223,17 @@ describe('ContextInjectorRegistry', () => {
 
 			const failingInjector: ContextInjector = {
 				name: 'failing',
+				order: 0,
 				injectSystemContext: () => {
 					throw new Error('Injector failed');
 				},
 				injectResumeContext: () => undefined,
 			};
 			registry.register(failingInjector);
-			registry.register(createMockInjector('working', { systemContext: 'Works fine' }));
+			registry.register(createMockInjector('working', { systemContext: 'Works fine', order: 1 }));
 			const ctx = createMockContext();
 
-			const result = registry.collectSystemContext(ctx);
+			const result = await registry.collectSystemContext(ctx);
 
 			// Should still get the working injector's context
 			expect(result).toBe('Works fine');
@@ -239,15 +244,15 @@ describe('ContextInjectorRegistry', () => {
 			);
 		});
 
-		it('should pass context to all injectors', () => {
+		it('should pass context to all injectors', async () => {
 			const registry = createContextInjectorRegistry();
-			const injector1 = createMockInjector('injector1');
-			const injector2 = createMockInjector('injector2');
+			const injector1 = createMockInjector('injector1', { order: 0 });
+			const injector2 = createMockInjector('injector2', { order: 1 });
 			registry.register(injector1);
 			registry.register(injector2);
 			const ctx = createMockContext({ sessionId: 'custom-session' });
 
-			registry.collectSystemContext(ctx);
+			await registry.collectSystemContext(ctx);
 
 			expect(injector1.injectSystemContext).toHaveBeenCalledWith(ctx);
 			expect(injector2.injectSystemContext).toHaveBeenCalledWith(ctx);
@@ -321,6 +326,7 @@ describe('ContextInjectorRegistry', () => {
 
 			const failingInjector: ContextInjector = {
 				name: 'failing',
+				order: 0,
 				injectSystemContext: () => undefined,
 				injectResumeContext: () => {
 					throw new Error('Injector failed');
@@ -330,6 +336,7 @@ describe('ContextInjectorRegistry', () => {
 			registry.register(
 				createMockInjector('working', {
 					resumeMessages: [{ role: 'user', content: [{ type: 'text', text: 'Works' }], timestamp: 1000 }],
+					order: 1,
 				}),
 			);
 			const ctx = createMockContext();
@@ -347,18 +354,18 @@ describe('ContextInjectorRegistry', () => {
 	});
 
 	describe('collect (deprecated)', () => {
-		it('should call collectSystemContext when isResume is false', () => {
+		it('should call collectSystemContext when isResume is false', async () => {
 			const registry = createContextInjectorRegistry();
 			registry.register(createMockInjector('test', { systemContext: 'Test context' }));
 			const ctx = createMockContext();
 
-			const result = registry.collect({ ...ctx, isResume: false });
+			const result = await registry.collect({ ...ctx, isResume: false });
 
 			expect(result.systemContext).toBe('Test context');
 			expect(result.resumeMessages).toBeUndefined();
 		});
 
-		it('should call collectResumeContext when isResume is true', () => {
+		it('should call collectResumeContext when isResume is true', async () => {
 			const registry = createContextInjectorRegistry();
 			registry.register(
 				createMockInjector('test', {
@@ -369,7 +376,7 @@ describe('ContextInjectorRegistry', () => {
 			);
 			const ctx = createMockContext();
 
-			const result = registry.collect({ ...ctx, isResume: true });
+			const result = await registry.collect({ ...ctx, isResume: true });
 
 			expect(result.resumeMessages).toHaveLength(1);
 			expect(result.systemContext).toBeUndefined();

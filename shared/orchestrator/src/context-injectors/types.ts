@@ -5,6 +5,8 @@
  * They can add to the system prompt (for new sessions) or prepend messages (when resuming).
  */
 
+import type { GuidanceContext } from '../guidance/types';
+import type { LoadedSkill } from '../skills/types';
 import type { CheckpointMessage } from '../snapshot/types';
 
 /**
@@ -27,6 +29,12 @@ export interface InjectorContext {
 	now: Date;
 	/** Session ID of the agent */
 	sessionId: string;
+	/** Guidance context with access to soul, instructions, tasks, etc. */
+	guidance?: GuidanceContext;
+	/** Loaded skills available to the agent */
+	skills?: LoadedSkill[];
+	/** Path to the guidance directory */
+	guidancePath?: string;
 }
 
 /**
@@ -39,12 +47,15 @@ export interface ContextInjector {
 	/** Unique name for this injector */
 	readonly name: string;
 
+	/** Ordering for this injector (lower values run first) */
+	readonly order: number;
+
 	/**
 	 * Inject context for the system prompt (new sessions).
 	 * @param ctx - The injector context
 	 * @returns System context string to append to the system prompt, or undefined
 	 */
-	injectSystemContext(ctx: InjectorContext): string | undefined;
+	injectSystemContext(ctx: InjectorContext): string | undefined | Promise<string | undefined>;
 
 	/**
 	 * Inject messages for resume operations.

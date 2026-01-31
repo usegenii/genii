@@ -14,6 +14,8 @@ import type { StepResumeData, SuspensionRequest, Tool, ToolContext, ToolResult }
 
 /**
  * Build the system prompt from guidance context.
+ * @deprecated Use context injectors instead. Soul, instructions, and skills are now
+ * injected via SoulContextInjector, InstructionsContextInjector, and SkillsContextInjector.
  */
 export function buildSystemPrompt(guidance: GuidanceContext, skills?: LoadedSkill[]): string {
 	const parts: string[] = [];
@@ -41,6 +43,8 @@ export function buildSystemPrompt(guidance: GuidanceContext, skills?: LoadedSkil
 
 /**
  * Build system prompt with task content and optional injected context.
+ * @deprecated Use context injectors instead. The system prompt is now built entirely
+ * via the ContextInjectorRegistry.collectSystemContext() method.
  */
 export async function buildSystemPromptWithTask(
 	guidance: GuidanceContext,
