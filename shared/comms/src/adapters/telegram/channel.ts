@@ -318,6 +318,21 @@ export class TelegramChannel implements Channel {
 	}
 
 	/**
+	 * Register slash commands with Telegram.
+	 * Uses Telegram's setMyCommands API.
+	 */
+	async setCommands(commands: Array<{ name: string; description: string }>): Promise<void> {
+		this._logger.debug({ commandCount: commands.length }, 'Registering commands with Telegram');
+		await this._transport.callApi('setMyCommands', {
+			commands: commands.map((cmd) => ({
+				command: cmd.name,
+				description: cmd.description,
+			})),
+		});
+		this._logger.info({ commandCount: commands.length }, 'Registered commands with Telegram');
+	}
+
+	/**
 	 * Send a chat action (typing indicator).
 	 */
 	private async sendChatAction(chatId: number, action: string): Promise<void> {

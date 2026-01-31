@@ -56,6 +56,14 @@ export interface Channel {
 	 * Disconnect from the messaging platform.
 	 */
 	disconnect(): Promise<void>;
+
+	/**
+	 * Register slash commands with the platform.
+	 * Not all platforms support this (optional method).
+	 *
+	 * @param commands - Array of command definitions to register
+	 */
+	setCommands?(commands: Array<{ name: string; description: string }>): Promise<void>;
 }
 
 /**

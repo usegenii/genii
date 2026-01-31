@@ -16,6 +16,7 @@ import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import { createFileSnapshotStore } from '@geniigotchi/orchestrator/snapshot/store';
 import type { SnapshotStore } from '@geniigotchi/orchestrator/snapshot/types';
+import { setupCommandSystem } from './commands/setup';
 import { ConversationManager } from './conversations/manager';
 import { createFileConversationStore } from './conversations/store';
 import { type Daemon, type DaemonConfig, DaemonImpl } from './daemon';
@@ -214,6 +215,16 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const conversationStore = createFileConversationStore(conversationStorePath, logger);
 	const conversationManager = new ConversationManager(logger, conversationStore);
 
+	// Set up command system
+	const { registry: commandRegistry, executor: commandExecutor } = setupCommandSystem(
+		{
+			coordinator,
+			conversations: conversationManager,
+			logger,
+		},
+		logger,
+	);
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
@@ -234,6 +245,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 			guidancePath,
 		},
 		logger,
+		commandExecutor,
 	};
 	const router = createMessageRouter(routerConfig);
 
@@ -276,6 +288,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		conversationManager,
 		router,
 		rpcServer,
+		commandRegistry,
 	});
 }
 
@@ -339,6 +352,16 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const conversationStore = createFileConversationStore(conversationStorePath, logger);
 	const conversationManager = new ConversationManager(logger, conversationStore);
 
+	// Set up command system
+	const { registry: commandRegistry, executor: commandExecutor } = setupCommandSystem(
+		{
+			coordinator,
+			conversations: conversationManager,
+			logger,
+		},
+		logger,
+	);
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
@@ -359,6 +382,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 			guidancePath,
 		},
 		logger,
+		commandExecutor,
 	};
 	const router = createMessageRouter(routerConfig);
 
@@ -401,5 +425,6 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		conversationManager,
 		router,
 		rpcServer,
+		commandRegistry,
 	});
 }

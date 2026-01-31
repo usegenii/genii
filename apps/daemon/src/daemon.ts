@@ -10,6 +10,7 @@
 
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
+import type { CommandRegistryInterface } from './commands/registry';
 import type { ConversationManager } from './conversations/manager';
 import type { Logger, LogLevel } from './logging/logger';
 import type { MessageRouter } from './router/router';
@@ -99,6 +100,8 @@ export interface DaemonDependencies {
 	router: MessageRouter;
 	/** RPC server for client connections */
 	rpcServer: RpcServer;
+	/** Command registry for slash commands (optional) */
+	commandRegistry?: CommandRegistryInterface;
 }
 
 /**
@@ -113,6 +116,7 @@ export class DaemonImpl implements Daemon {
 	private readonly _conversationManager: ConversationManager;
 	private readonly _router: MessageRouter;
 	private readonly _rpcServer: RpcServer;
+	private readonly _commandRegistry: CommandRegistryInterface | undefined;
 
 	private _state: DaemonState = 'stopped';
 	private _startedAt: Date | undefined;
@@ -126,6 +130,7 @@ export class DaemonImpl implements Daemon {
 		this._conversationManager = deps.conversationManager;
 		this._router = deps.router;
 		this._rpcServer = deps.rpcServer;
+		this._commandRegistry = deps.commandRegistry;
 	}
 
 	/**
@@ -312,12 +317,29 @@ export class DaemonImpl implements Daemon {
 	 */
 	private async _connectChannels(): Promise<void> {
 		const channels = this._channelRegistry.list();
+		const commandDefs = this._commandRegistry?.definitions() ?? [];
 
 		for (const channel of channels) {
 			if (channel.status === 'disconnected') {
 				try {
 					this._logger.debug({ channelId: channel.id }, 'Connecting channel');
 					await channel.connect();
+
+					// Register slash commands if the channel supports it
+					if (channel.setCommands && commandDefs.length > 0) {
+						try {
+							await channel.setCommands(commandDefs);
+							this._logger.debug(
+								{ channelId: channel.id, commandCount: commandDefs.length },
+								'Registered commands with channel',
+							);
+						} catch (cmdError) {
+							this._logger.warn(
+								{ error: cmdError, channelId: channel.id },
+								'Failed to register commands',
+							);
+						}
+					}
 				} catch (error) {
 					this._logger.warn({ error, channelId: channel.id }, 'Failed to connect channel');
 				}

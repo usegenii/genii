@@ -9,7 +9,7 @@
  */
 
 import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { InboundEvent } from '@geniigotchi/comms/events/types';
+import type { CommandReceivedEvent, InboundEvent } from '@geniigotchi/comms/events/types';
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { ChannelId, Disposable } from '@geniigotchi/comms/types/core';
 import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
@@ -17,6 +17,7 @@ import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
 import type { AgentEvent, CoordinatorEvent } from '@geniigotchi/orchestrator/events/types';
 import type { Tool, ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
 import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@geniigotchi/orchestrator/types/core';
+import type { CommandExecutorInterface } from '../commands/executor';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { agentEventToOutboundIntent, inboundEventToAgentInput } from './transforms';
@@ -71,6 +72,8 @@ export interface MessageRouterConfig {
 	defaultSpawnContext: AgentSpawnContext;
 	/** Logger instance */
 	logger: Logger;
+	/** Optional command executor for handling slash commands */
+	commandExecutor?: CommandExecutorInterface;
 }
 
 /**
@@ -114,6 +117,7 @@ export class MessageRouter implements MessageRouterInterface {
 	private readonly _conversationManager: ConversationManager;
 	private readonly _adapterFactory: AgentAdapterFactory;
 	private readonly _defaultSpawnContext: AgentSpawnContext;
+	private readonly _commandExecutor: CommandExecutorInterface | undefined;
 
 	/** Subscriptions to clean up on stop */
 	private readonly _subscriptions: Disposable[] = [];
@@ -128,6 +132,7 @@ export class MessageRouter implements MessageRouterInterface {
 		this._conversationManager = config.conversationManager;
 		this._adapterFactory = config.adapterFactory;
 		this._defaultSpawnContext = config.defaultSpawnContext;
+		this._commandExecutor = config.commandExecutor;
 	}
 
 	/**
@@ -194,6 +199,12 @@ export class MessageRouter implements MessageRouterInterface {
 	 */
 	async handleInbound(event: InboundEvent, channelId: ChannelId): Promise<void> {
 		this._logger.debug({ eventType: event.type, channelId }, 'Handling inbound event');
+
+		// Check if it's a command event
+		if (event.type === 'command_received' && this._commandExecutor) {
+			await this._handleCommand(event, channelId);
+			return;
+		}
 
 		// Transform the event to agent input
 		const agentInput = inboundEventToAgentInput(event);
@@ -310,6 +321,107 @@ export class MessageRouter implements MessageRouterInterface {
 			this._logger.debug({ channelId, intentType: intent.type }, 'Sent intent to channel');
 		} catch (error) {
 			this._logger.error({ error, channelId, intentType: intent.type }, 'Error sending intent to channel');
+		}
+	}
+
+	/**
+	 * Handle a slash command event.
+	 *
+	 * @param event - The command event
+	 * @param channelId - The channel the command came from
+	 */
+	private async _handleCommand(event: CommandReceivedEvent, channelId: ChannelId): Promise<void> {
+		if (!this._commandExecutor) {
+			return;
+		}
+
+		this._logger.debug({ command: event.command, args: event.args }, 'Handling command');
+
+		const result = await this._commandExecutor.execute(event.command, event.args, event.origin);
+
+		switch (result.type) {
+			case 'handled':
+				if (result.response) {
+					await this._sendTextResponse(channelId, event.origin, result.response);
+				}
+				break;
+
+			case 'forward': {
+				// Forward to agent as a regular message by transforming to agent input
+				// and processing through normal flow
+				this._logger.debug({ command: event.command }, 'Forwarding command to agent');
+				// Reconstruct as a message and process
+				const message = `/${event.command}${event.args ? ` ${event.args}` : ''}`;
+				await this._processMessageInput(event.origin, channelId, message);
+				break;
+			}
+
+			case 'error':
+				await this._sendTextResponse(channelId, event.origin, `⚠️ ${result.error}`);
+				break;
+
+			case 'silent':
+				// Do nothing
+				break;
+		}
+	}
+
+	/**
+	 * Send a text response to a destination.
+	 *
+	 * @param channelId - The channel to send through
+	 * @param destination - The destination to send to
+	 * @param text - The text message to send
+	 */
+	private async _sendTextResponse(channelId: ChannelId, destination: Destination, text: string): Promise<void> {
+		try {
+			await this._channelRegistry.process(channelId, {
+				type: 'agent_responding',
+				destination: {
+					...destination,
+					metadata: {
+						conversationType: 'direct',
+					},
+				},
+				content: {
+					type: 'text',
+					text,
+				},
+			});
+		} catch (error) {
+			this._logger.error({ error, channelId }, 'Failed to send text response');
+		}
+	}
+
+	/**
+	 * Process a message input through the normal agent routing flow.
+	 *
+	 * @param destination - Where the message came from
+	 * @param channelId - The channel ID
+	 * @param message - The message text
+	 */
+	private async _processMessageInput(destination: Destination, channelId: ChannelId, message: string): Promise<void> {
+		// Get or create conversation binding for this destination
+		const binding = this._conversationManager.getOrCreate(destination);
+
+		// If no agent is bound, spawn a new one with the initial input
+		if (binding.agentId === null) {
+			const agentId = await this._spawnAgent(channelId, {
+				message,
+				context: {},
+			});
+			this._conversationManager.bind(destination, agentId);
+			this._logger.info(
+				{ agentId, destination: `${destination.channelId}:${destination.ref}` },
+				'Spawned and bound new agent for forwarded command',
+			);
+			return;
+		}
+
+		// Agent already exists - send the message
+		const agentHandle = this._coordinator.get(binding.agentId);
+		if (agentHandle && agentHandle.status !== 'completed') {
+			await agentHandle.send({ message, context: {} });
 		}
 	}
 
