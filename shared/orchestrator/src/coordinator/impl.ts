@@ -8,6 +8,8 @@ import type { CoordinatorEvent } from '../events/types';
 import { createGuidanceContext } from '../guidance/context';
 import { type AgentHandleImpl, createAgentHandle } from '../handle/impl';
 import type { AgentHandle } from '../handle/types';
+import { createSkillsLoader } from '../skills/loader';
+import type { LoadedSkill } from '../skills/types';
 import type { AgentCheckpoint } from '../snapshot/types';
 import type {
 	AgentFilter,
@@ -109,6 +111,25 @@ export class CoordinatorImpl implements Coordinator {
 		this.logger.debug({ guidancePath }, 'Creating guidance context for agent spawn');
 		const guidance = await createGuidanceContext({ root: guidancePath, logger: this.logger });
 
+		// Load skills if skillsPath is configured
+		let skills: LoadedSkill[] = [];
+		if (this.config.skillsPath) {
+			this.logger.debug({ skillsPath: this.config.skillsPath }, 'Loading skills for agent spawn');
+			const skillsLoader = createSkillsLoader({
+				skillsDir: this.config.skillsPath,
+				logger: this.logger,
+			});
+			skills = await skillsLoader.loadAll();
+			this.logger.info(
+				{
+					skillsPath: this.config.skillsPath,
+					skillCount: skills.length,
+					skillNames: skills.map((s) => s.name),
+				},
+				'Skills loaded for agent spawn',
+			);
+		}
+
 		// Create instance via adapter
 		const instance = await adapter.create({
 			guidance,
@@ -119,6 +140,7 @@ export class CoordinatorImpl implements Coordinator {
 			tools: config.tools,
 			tags: config.tags,
 			metadata: config.metadata,
+			skills,
 		});
 
 		// Create handle
@@ -254,6 +276,25 @@ export class CoordinatorImpl implements Coordinator {
 		this.logger.debug({ guidancePath, sessionId }, 'Restoring guidance context from checkpoint');
 		const guidance = await createGuidanceContext({ root: guidancePath, logger: this.logger });
 
+		// Load skills if skillsPath is configured
+		let skills: LoadedSkill[] = [];
+		if (this.config.skillsPath) {
+			this.logger.debug({ skillsPath: this.config.skillsPath, sessionId }, 'Loading skills for session continue');
+			const skillsLoader = createSkillsLoader({
+				skillsDir: this.config.skillsPath,
+				logger: this.logger,
+			});
+			skills = await skillsLoader.loadAll();
+			this.logger.info(
+				{
+					skillsPath: this.config.skillsPath,
+					skillCount: skills.length,
+					skillNames: skills.map((s) => s.name),
+				},
+				'Skills loaded for session continue',
+			);
+		}
+
 		// Restore instance via adapter with new input
 		const instance = await adapter.restore(checkpoint, {
 			guidance,
@@ -263,6 +304,7 @@ export class CoordinatorImpl implements Coordinator {
 			tools: continueConfig?.tools,
 			tags: checkpoint.session.tags,
 			metadata: checkpoint.session.metadata,
+			skills,
 		});
 
 		// Create handle - reusing the session ID from checkpoint

@@ -4,6 +4,7 @@
 
 import type { AgentEvent, PendingRequestInfo, PendingResolution } from '../events/types';
 import type { GuidanceContext } from '../guidance/types';
+import type { LoadedSkill } from '../skills/types';
 import type { AgentCheckpoint, InstanceCheckpoint } from '../snapshot/types';
 import type { ToolRegistryInterface } from '../tools/types';
 import type { AgentInput, AgentLimits, AgentSessionId } from '../types/core';
@@ -54,6 +55,8 @@ export interface AdapterCreateConfig {
 	tags?: string[] | undefined;
 	/** Arbitrary metadata */
 	metadata?: Record<string, unknown> | undefined;
+	/** Available skills loaded from skills directory */
+	skills?: LoadedSkill[] | undefined;
 }
 
 /**

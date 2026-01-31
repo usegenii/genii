@@ -106,6 +106,8 @@ export interface CoordinatorConfig {
 	snapshotStore?: SnapshotStore;
 	/** Default guidance path if not specified in spawn config */
 	defaultGuidancePath?: string;
+	/** Path to skills directory (optional, skills loaded at spawn time) */
+	skillsPath?: string;
 	/** Logger for coordinator events */
 	logger?: Logger;
 }

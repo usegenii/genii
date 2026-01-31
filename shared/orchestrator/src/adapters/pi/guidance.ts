@@ -5,6 +5,8 @@
 import type { AgentToolResult, AgentTool as PiAgentTool } from '@mariozechner/pi-agent-core';
 import type { Static, TSchema } from '@sinclair/typebox';
 import type { GuidanceContext } from '../../guidance/types';
+import { formatSkillsForPrompt } from '../../skills/format';
+import type { LoadedSkill } from '../../skills/types';
 import type { ToolExecutionState } from '../../snapshot/types';
 import { createStepContext, type StepContextImpl } from '../../tools/step-context';
 import { isSuspensionError } from '../../tools/suspension';
@@ -13,7 +15,7 @@ import type { StepResumeData, SuspensionRequest, Tool, ToolContext, ToolResult }
 /**
  * Build the system prompt from guidance context.
  */
-export function buildSystemPrompt(guidance: GuidanceContext): string {
+export function buildSystemPrompt(guidance: GuidanceContext, skills?: LoadedSkill[]): string {
 	const parts: string[] = [];
 
 	// Add SOUL.md
@@ -26,8 +28,13 @@ export function buildSystemPrompt(guidance: GuidanceContext): string {
 		parts.push(guidance.instructions);
 	}
 
-	// Add task-specific instructions (loaded separately)
-	// The task content would be injected here if provided
+	// Add available skills
+	if (skills && skills.length > 0) {
+		const skillsSection = formatSkillsForPrompt(skills);
+		if (skillsSection) {
+			parts.push(skillsSection);
+		}
+	}
 
 	return parts.join('\n\n---\n\n');
 }
@@ -35,7 +42,11 @@ export function buildSystemPrompt(guidance: GuidanceContext): string {
 /**
  * Build system prompt with task content.
  */
-export async function buildSystemPromptWithTask(guidance: GuidanceContext, taskId?: string): Promise<string> {
+export async function buildSystemPromptWithTask(
+	guidance: GuidanceContext,
+	taskId?: string,
+	skills?: LoadedSkill[],
+): Promise<string> {
 	const parts: string[] = [];
 
 	// Add SOUL.md
@@ -46,6 +57,14 @@ export async function buildSystemPromptWithTask(guidance: GuidanceContext, taskI
 	// Add INSTRUCTIONS.md
 	if (guidance.instructions) {
 		parts.push(guidance.instructions);
+	}
+
+	// Add available skills
+	if (skills && skills.length > 0) {
+		const skillsSection = formatSkillsForPrompt(skills);
+		if (skillsSection) {
+			parts.push(skillsSection);
+		}
 	}
 
 	// Add task content if specified

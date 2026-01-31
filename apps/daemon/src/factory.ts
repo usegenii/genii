@@ -207,12 +207,14 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	// Create shutdown manager
 	const shutdownManager = new ShutdownManager(logger);
 
-	// Create coordinator with guidance directory and snapshot store
+	// Create coordinator with guidance directory, skills, and snapshot store
 	const snapshotPath = join(dataPath, 'snapshots');
+	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = createFileSnapshotStore({ directory: snapshotPath });
 
 	const coordinator = createCoordinator({
 		defaultGuidancePath: guidancePath,
+		skillsPath,
 		snapshotStore,
 		logger,
 	});
@@ -362,6 +364,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 
 	// Create or use provided coordinator with snapshot store
 	const snapshotPath = join(dataPath, 'snapshots');
+	const skillsPath = join(dataPath, 'skills');
 	const snapshotStore = options.snapshotStore ?? createFileSnapshotStore({ directory: snapshotPath });
 
 	// Use provided or create coordinator with snapshot store
@@ -369,6 +372,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		options.coordinator ??
 		createCoordinator({
 			defaultGuidancePath: guidancePath,
+			skillsPath,
 			snapshotStore,
 			logger,
 		});

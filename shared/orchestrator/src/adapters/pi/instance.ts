@@ -533,8 +533,8 @@ export async function createPiAgentInstance(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task);
+	// Build system prompt with skills
+	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills);
 
 	return new PiAgentInstance(config, model, systemPrompt, {
 		apiKey: options.apiKey,
@@ -589,8 +589,8 @@ export async function createPiAgentInstanceFromCheckpoint(
 		options.thinkingLevel,
 	);
 
-	// Build system prompt
-	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task);
+	// Build system prompt with skills
+	const systemPrompt = await buildSystemPromptWithTask(config.guidance, config.task, config.skills);
 
 	// Create restore options from checkpoint
 	const restoreOptions: RestoreOptions = {
