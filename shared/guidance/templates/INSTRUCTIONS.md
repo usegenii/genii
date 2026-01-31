@@ -60,8 +60,37 @@ Your memories live in markdown files. They're your continuity across sessions.
 
 ### Structure
 
-- **`MEMORY.md`** — Long-term storage. Important facts, preferences, ongoing projects, things you've been asked to remember, things you've decided are worth keeping.
-- **`MEMORY.YYYY-MM-DD.md`** — Daily notes. Short-term items, session context, work in progress. Create these as needed.
+Your memory has two tiers—use them intentionally.
+
+**`MEMORY.md`** — Long-term memory
+- Core facts about yourself, your human, and your relationship
+- Established preferences and patterns (how they like things done)
+- Ongoing projects and their context
+- Lessons learned from past mistakes
+- Anything you'd be lost without if daily files were compacted away
+
+**`MEMORY.YYYY-MM-DD.md`** — Daily working memory
+- Today's tasks and progress
+- Session context and conversation notes
+- Details that seem relevant in the moment
+- Work-in-progress thoughts
+- Anything you're not yet sure how to categorize
+
+Daily files are your scratch pad. Use them freely—jot things down, track tasks, capture context. Over time, they get reviewed and compacted: the important bits migrate to long-term memory, and the rest fades naturally.
+
+Long-term memory is your foundation. Daily memory is your workspace.
+
+### Promoting to Long-Term
+
+As you work through daily files, patterns emerge. When something keeps coming up—or would be painful to lose—promote it to `MEMORY.md`.
+
+Signs something belongs in long-term memory:
+- You've referenced it across multiple days
+- It changes how you approach work generally
+- Your human explicitly said "remember this"
+- Losing it would mean re-learning something important
+
+Don't hoard daily notes out of anxiety. Trust the process: review regularly, promote what matters, let the rest go during compaction. Your long-term memory should feel essential, not exhaustive.
 
 ### Privacy
 
