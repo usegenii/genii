@@ -20,6 +20,7 @@ import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@geniigotchi/
 import type { CommandExecutorInterface } from '../commands/executor';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
+import type { LastActiveTracker } from '../scheduler/last-active-tracker';
 import { agentEventToOutboundIntent, inboundEventToAgentInput } from './transforms';
 
 /**
@@ -61,6 +62,8 @@ export interface MessageRouterConfig {
 	commandExecutor?: CommandExecutorInterface;
 	/** Tool registry for agents */
 	toolRegistry?: ToolRegistryInterface;
+	/** Optional last active tracker for pulse response routing */
+	lastActiveTracker?: LastActiveTracker;
 }
 
 /**
@@ -106,6 +109,7 @@ export class MessageRouter implements MessageRouterInterface {
 	private readonly _defaultSpawnContext: AgentSpawnContext;
 	private readonly _commandExecutor: CommandExecutorInterface | undefined;
 	private readonly _toolRegistry: ToolRegistryInterface | undefined;
+	private readonly _lastActiveTracker: LastActiveTracker | undefined;
 
 	/** Subscriptions to clean up on stop */
 	private readonly _subscriptions: Disposable[] = [];
@@ -122,6 +126,7 @@ export class MessageRouter implements MessageRouterInterface {
 		this._defaultSpawnContext = config.defaultSpawnContext;
 		this._commandExecutor = config.commandExecutor;
 		this._toolRegistry = config.toolRegistry;
+		this._lastActiveTracker = config.lastActiveTracker;
 	}
 
 	/**
@@ -188,6 +193,11 @@ export class MessageRouter implements MessageRouterInterface {
 	 */
 	async handleInbound(event: InboundEvent, channelId: ChannelId): Promise<void> {
 		this._logger.debug({ eventType: event.type, channelId }, 'Handling inbound event');
+
+		// Update last active tracker if available (for pulse response routing)
+		if (this._lastActiveTracker && 'origin' in event && event.origin) {
+			this._lastActiveTracker.update(event.origin);
+		}
 
 		// Check if it's a command event
 		if (event.type === 'command_received' && this._commandExecutor) {

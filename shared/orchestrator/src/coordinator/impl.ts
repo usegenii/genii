@@ -60,12 +60,14 @@ export class CoordinatorImpl implements Coordinator {
 	 * @param sessionId - The agent session ID
 	 * @param guidance - The guidance context
 	 * @param skills - Loaded skills
+	 * @param metadata - Optional metadata to pass to injectors
 	 * @returns System context string, or undefined if no registry/context
 	 */
 	private async collectSystemContext(
 		sessionId: string,
 		guidance: GuidanceContext,
 		skills: LoadedSkill[],
+		metadata?: Record<string, unknown>,
 	): Promise<string | undefined> {
 		if (!this.contextInjectorRegistry) {
 			return undefined;
@@ -78,6 +80,7 @@ export class CoordinatorImpl implements Coordinator {
 			guidance,
 			skills,
 			guidancePath: guidance.root,
+			metadata,
 		};
 
 		const systemContext = await this.contextInjectorRegistry.collectSystemContext(ctx);
@@ -211,8 +214,8 @@ export class CoordinatorImpl implements Coordinator {
 			);
 		}
 
-		// Collect system context for new spawn (needs guidance and skills)
-		const systemContext = await this.collectSystemContext(sessionId, guidance, skills);
+		// Collect system context for new spawn (needs guidance and skills, and metadata for pulse)
+		const systemContext = await this.collectSystemContext(sessionId, guidance, skills, config.metadata);
 		const contextInjection: ContextInjection | undefined = systemContext ? { systemContext } : undefined;
 
 		// Create instance via adapter

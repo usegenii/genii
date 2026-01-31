@@ -35,6 +35,8 @@ export interface InjectorContext {
 	skills?: LoadedSkill[];
 	/** Path to the guidance directory */
 	guidancePath?: string;
+	/** Optional metadata passed from spawn config (e.g., for pulse sessions) */
+	metadata?: Record<string, unknown>;
 }
 
 /**

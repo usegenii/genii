@@ -25,6 +25,7 @@
 		"@geniigotchi/models": "workspace:*",
 		"@geniigotchi/comms": "workspace:*",
 		"@geniigotchi/guidance": "workspace:*",
+		"croner": "^9.0.0",
 		"pino": "^9.0.0",
 		"pino-pretty": "^11.0.0"
 	},

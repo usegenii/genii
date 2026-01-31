@@ -11,11 +11,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
 import type { Config } from '@geniigotchi/config/config';
+import { DEFAULT_PULSE_SCHEDULE } from '@geniigotchi/config/types/preferences';
 import type { ModelFactory } from '@geniigotchi/models/factory';
 import { DateTimeContextInjector } from '@geniigotchi/orchestrator/context-injectors/datetime/injector';
 import { IdentityContextInjector } from '@geniigotchi/orchestrator/context-injectors/identity/injector';
 import { InstructionsContextInjector } from '@geniigotchi/orchestrator/context-injectors/instructions/injector';
 import { MemoriesPathContextInjector } from '@geniigotchi/orchestrator/context-injectors/memories-path/injector';
+import { PulseContextInjector } from '@geniigotchi/orchestrator/context-injectors/pulse/injector';
 import { ContextInjectorRegistry } from '@geniigotchi/orchestrator/context-injectors/registry';
 import { SkillsContextInjector } from '@geniigotchi/orchestrator/context-injectors/skills/injector';
 import { SoulContextInjector } from '@geniigotchi/orchestrator/context-injectors/soul/injector';
@@ -39,6 +41,10 @@ import { createMessageRouter, type MessageRouterConfig } from './router/router';
 import { createHandlers, type DaemonRuntimeConfig } from './rpc/handlers';
 import { createRpcServer, type RpcServer } from './rpc/server';
 import { createSubscriptionManager } from './rpc/subscriptions';
+import { createDestinationResolver } from './scheduler/destination-resolver';
+import { createPulseJob } from './scheduler/jobs/pulse';
+import { createLastActiveTracker } from './scheduler/last-active-tracker';
+import { createScheduler } from './scheduler/scheduler';
 import { ShutdownManager } from './shutdown/manager';
 import { SocketTransportServer } from './transport/socket/server';
 import type { TransportConnection } from './transport/types';
@@ -230,6 +236,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	contextInjectorRegistry.register(new MemoriesPathContextInjector());
 	contextInjectorRegistry.register(new DateTimeContextInjector());
 	contextInjectorRegistry.register(new TasksContextInjector());
+	contextInjectorRegistry.register(new PulseContextInjector());
 
 	// Resolve timezone from preferences or system default
 	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -275,30 +282,67 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const dateTimeTool = createDateTimeTool({ timezone });
 	toolRegistry.register(dateTimeTool);
 
+	// Create last active tracker for pulse response routing
+	const lastActiveTrackerPath = join(dataPath, 'last-active.json');
+	const lastActiveTracker = createLastActiveTracker(lastActiveTrackerPath, logger);
+
+	// Create adapter factory for reuse
+	const adapterFactory = async () => {
+		if (!options.modelFactory) {
+			throw new Error('ModelFactory not configured');
+		}
+		if (!options.config) {
+			throw new Error('Config not provided - cannot resolve default model');
+		}
+
+		const model = resolveDefaultModel(options.config);
+		return options.modelFactory.createAdapter(model);
+	};
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
 		channelRegistry,
 		conversationManager,
-		adapterFactory: async (_agentId) => {
-			if (!options.modelFactory) {
-				throw new Error('ModelFactory not configured');
-			}
-			if (!options.config) {
-				throw new Error('Config not provided - cannot resolve default model');
-			}
-
-			const model = resolveDefaultModel(options.config);
-			return options.modelFactory.createAdapter(model);
-		},
+		adapterFactory,
 		defaultSpawnContext: {
 			guidancePath,
 		},
 		logger,
 		commandExecutor,
 		toolRegistry,
+		lastActiveTracker,
 	};
 	const router = createMessageRouter(routerConfig);
+
+	// Create scheduler if enabled
+	const schedulerConfig = options.config?.getPreferences()?.scheduler;
+	let scheduler: ReturnType<typeof createScheduler> | undefined;
+
+	if (schedulerConfig?.enabled && schedulerConfig.pulse) {
+		const pulseSchedule = schedulerConfig.pulse.schedule ?? DEFAULT_PULSE_SCHEDULE;
+		const destinationResolver = createDestinationResolver(schedulerConfig, lastActiveTracker, logger);
+
+		scheduler = createScheduler({ logger });
+
+		const pulseJob = createPulseJob({
+			config: {
+				schedule: pulseSchedule,
+				promptPath: schedulerConfig.pulse.promptPath,
+				responseTo: schedulerConfig.pulse.responseTo,
+			},
+			coordinator,
+			channelRegistry,
+			destinationResolver,
+			adapterFactory,
+			guidancePath,
+			toolRegistry,
+			logger,
+		});
+
+		scheduler.register(pulseJob, pulseSchedule);
+		logger.info({ schedule: pulseSchedule }, 'Registered pulse job');
+	}
 
 	// Create transport server
 	const transport = new SocketTransportServer(
@@ -342,6 +386,8 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		router,
 		rpcServer,
 		commandRegistry,
+		scheduler,
+		lastActiveTracker,
 	});
 }
 
@@ -405,6 +451,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	contextInjectorRegistry.register(new MemoriesPathContextInjector());
 	contextInjectorRegistry.register(new DateTimeContextInjector());
 	contextInjectorRegistry.register(new TasksContextInjector());
+	contextInjectorRegistry.register(new PulseContextInjector());
 
 	// Resolve timezone from preferences or system default
 	const timezone = options.config?.getPreferences()?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -451,30 +498,67 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const dateTimeTool = createDateTimeTool({ timezone });
 	toolRegistry.register(dateTimeTool);
 
+	// Create last active tracker for pulse response routing
+	const lastActiveTrackerPath = join(dataPath, 'last-active.json');
+	const lastActiveTracker = createLastActiveTracker(lastActiveTrackerPath, logger);
+
+	// Create adapter factory for reuse
+	const adapterFactory = async () => {
+		if (!options.modelFactory) {
+			throw new Error('ModelFactory not configured');
+		}
+		if (!options.config) {
+			throw new Error('Config not provided - cannot resolve default model');
+		}
+
+		const model = resolveDefaultModel(options.config);
+		return options.modelFactory.createAdapter(model);
+	};
+
 	// Create message router with configured adapter factory
 	const routerConfig: MessageRouterConfig = {
 		coordinator,
 		channelRegistry,
 		conversationManager,
-		adapterFactory: async (_agentId) => {
-			if (!options.modelFactory) {
-				throw new Error('ModelFactory not configured');
-			}
-			if (!options.config) {
-				throw new Error('Config not provided - cannot resolve default model');
-			}
-
-			const model = resolveDefaultModel(options.config);
-			return options.modelFactory.createAdapter(model);
-		},
+		adapterFactory,
 		defaultSpawnContext: {
 			guidancePath,
 		},
 		logger,
 		commandExecutor,
 		toolRegistry,
+		lastActiveTracker,
 	};
 	const router = createMessageRouter(routerConfig);
+
+	// Create scheduler if enabled
+	const schedulerConfig = options.config?.getPreferences()?.scheduler;
+	let scheduler: ReturnType<typeof createScheduler> | undefined;
+
+	if (schedulerConfig?.enabled && schedulerConfig.pulse) {
+		const pulseSchedule = schedulerConfig.pulse.schedule ?? DEFAULT_PULSE_SCHEDULE;
+		const destinationResolver = createDestinationResolver(schedulerConfig, lastActiveTracker, logger);
+
+		scheduler = createScheduler({ logger });
+
+		const pulseJob = createPulseJob({
+			config: {
+				schedule: pulseSchedule,
+				promptPath: schedulerConfig.pulse.promptPath,
+				responseTo: schedulerConfig.pulse.responseTo,
+			},
+			coordinator,
+			channelRegistry,
+			destinationResolver,
+			adapterFactory,
+			guidancePath,
+			toolRegistry,
+			logger,
+		});
+
+		scheduler.register(pulseJob, pulseSchedule);
+		logger.info({ schedule: pulseSchedule }, 'Registered pulse job');
+	}
 
 	// Create transport server
 	const transport = new SocketTransportServer(
@@ -518,5 +602,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		router,
 		rpcServer,
 		commandRegistry,
+		scheduler,
+		lastActiveTracker,
 	});
 }

@@ -15,6 +15,8 @@ import type { ConversationManager } from './conversations/manager';
 import type { Logger, LogLevel } from './logging/logger';
 import type { MessageRouter } from './router/router';
 import type { RpcServer } from './rpc/server';
+import type { LastActiveTracker } from './scheduler/last-active-tracker';
+import type { Scheduler } from './scheduler/scheduler';
 import type { ShutdownManager, ShutdownMode } from './shutdown/manager';
 
 /** Daemon version */
@@ -102,6 +104,10 @@ export interface DaemonDependencies {
 	rpcServer: RpcServer;
 	/** Command registry for slash commands (optional) */
 	commandRegistry?: CommandRegistryInterface;
+	/** Scheduler for periodic jobs (optional) */
+	scheduler?: Scheduler;
+	/** Last active tracker for pulse response routing (optional) */
+	lastActiveTracker?: LastActiveTracker;
 }
 
 /**
@@ -117,6 +123,8 @@ export class DaemonImpl implements Daemon {
 	private readonly _router: MessageRouter;
 	private readonly _rpcServer: RpcServer;
 	private readonly _commandRegistry: CommandRegistryInterface | undefined;
+	private readonly _scheduler: Scheduler | undefined;
+	private readonly _lastActiveTracker: LastActiveTracker | undefined;
 
 	private _state: DaemonState = 'stopped';
 	private _startedAt: Date | undefined;
@@ -131,6 +139,8 @@ export class DaemonImpl implements Daemon {
 		this._router = deps.router;
 		this._rpcServer = deps.rpcServer;
 		this._commandRegistry = deps.commandRegistry;
+		this._scheduler = deps.scheduler;
+		this._lastActiveTracker = deps.lastActiveTracker;
 	}
 
 	/**
@@ -140,9 +150,11 @@ export class DaemonImpl implements Daemon {
 	 * 1. Initialize coordinator
 	 * 2. Start conversation manager (loads persisted state)
 	 * 3. Start message router (connects to channels and coordinator)
-	 * 4. Register shutdown handlers
-	 * 5. Start RPC server (starts accepting connections)
-	 * 6. Connect all registered channels
+	 * 4. Start last active tracker (loads persisted state)
+	 * 5. Start scheduler (register jobs, start cron)
+	 * 6. Register shutdown handlers
+	 * 7. Start RPC server (starts accepting connections)
+	 * 8. Connect all registered channels
 	 */
 	async start(): Promise<void> {
 		if (this._state !== 'stopped') {
@@ -165,14 +177,26 @@ export class DaemonImpl implements Daemon {
 			this._logger.debug('Starting message router');
 			await this._router.start();
 
-			// Step 4: Register shutdown handlers with priorities
+			// Step 4: Start last active tracker (loads persisted state)
+			if (this._lastActiveTracker) {
+				this._logger.debug('Loading last active tracker state');
+				await this._lastActiveTracker.load();
+			}
+
+			// Step 5: Start scheduler
+			if (this._scheduler) {
+				this._logger.debug('Starting scheduler');
+				await this._scheduler.start();
+			}
+
+			// Step 6: Register shutdown handlers with priorities
 			this._registerShutdownHandlers();
 
-			// Step 5: Start RPC server
+			// Step 7: Start RPC server
 			this._logger.debug('Starting RPC server');
 			await this._rpcServer.start();
 
-			// Step 6: Connect all registered channels
+			// Step 8: Connect all registered channels
 			this._logger.debug('Connecting channels');
 			await this._connectChannels();
 
@@ -252,8 +276,10 @@ export class DaemonImpl implements Daemon {
 	 *
 	 * Priorities:
 	 * - 0: Stop accepting new work (RPC server)
+	 * - 5: Stop scheduler (prevent new pulse sessions)
 	 * - 10: Disconnect channels
 	 * - 20: Stop message router
+	 * - 25: Save last active tracker state
 	 * - 30: Shutdown coordinator (suspends/terminates agents)
 	 * - 40: Stop conversation manager (persists state)
 	 */
@@ -267,6 +293,18 @@ export class DaemonImpl implements Daemon {
 			},
 			0,
 		);
+
+		// Priority 5: Stop scheduler (prevent new pulse sessions)
+		if (this._scheduler) {
+			this._shutdownManager.register(
+				'scheduler',
+				async () => {
+					this._logger.debug('Stopping scheduler');
+					await this._scheduler?.stop();
+				},
+				5,
+			);
+		}
 
 		// Priority 10: Disconnect all channels
 		this._shutdownManager.register(
@@ -287,6 +325,18 @@ export class DaemonImpl implements Daemon {
 			},
 			20,
 		);
+
+		// Priority 25: Save last active tracker state
+		if (this._lastActiveTracker) {
+			this._shutdownManager.register(
+				'last-active-tracker',
+				async () => {
+					this._logger.debug('Saving last active tracker state');
+					await this._lastActiveTracker?.save();
+				},
+				25,
+			);
+		}
 
 		// Priority 30: Shutdown coordinator
 		this._shutdownManager.register(

@@ -20,6 +20,8 @@ export const INJECTOR_ORDER = {
 	DATETIME: 300,
 	/** Tasks section - available task documents */
 	TASKS: 400,
+	/** Pulse context - scheduled session instructions (after tasks) */
+	PULSE: 500,
 } as const;
 
 export type InjectorOrderKey = keyof typeof INJECTOR_ORDER;

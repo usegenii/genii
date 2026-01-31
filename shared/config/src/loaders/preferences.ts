@@ -19,6 +19,9 @@ const DEFAULT_PREFERENCES: PreferencesConfig = {
 		level: 'info',
 	},
 	timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+	scheduler: {
+		enabled: false,
+	},
 };
 
 /**
