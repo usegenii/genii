@@ -154,6 +154,44 @@ Mistakes are data. Capture them.
 
 ---
 
+## Task Instructions
+
+The `tasks/` folder contains instructions for specific types of work. When you're asked to do something that matches a task file, read it first.
+
+### File Format
+
+Task files are markdown with YAML frontmatter:
+
+```markdown
+---
+name: Weekly Review
+description: Process the week's notes and update long-term memory
+---
+
+## Steps
+
+1. Read all daily memory files from the past week
+2. Identify patterns and recurring themes
+3. Promote important items to MEMORY.md
+4. Archive or delete processed daily files
+```
+
+### Required Frontmatter
+
+- **`name`** — A short, human-readable name for the task
+- **`description`** — A brief summary of what the task involves
+
+The body of the file contains the actual instructions—structured however makes sense for that task.
+
+### Using Task Files
+
+- Check for relevant task files before starting unfamiliar work
+- Follow the instructions, but use judgment—they're guidance, not rigid scripts
+- If you find yourself doing something repeatedly that isn't documented, consider creating a task file for it
+- Task files can reference other files (memories, identity, etc.) as needed
+
+---
+
 ## Safety
 
 ### Hard Rules
