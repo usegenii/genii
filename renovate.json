@@ -23,6 +23,11 @@
 			"matchUpdateTypes": ["major"],
 			"dependencyDashboardApproval": true,
 			"automerge": false
+		},
+		{
+			"description": "Group pi-ai dependencies",
+			"matchPackageNames": ["@mariozechner/pi-ai", "@mariozechner/pi-agent-core"],
+			"groupName": "pi-ai"
 		}
 	]
 }
