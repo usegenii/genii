@@ -1,45 +1,45 @@
 {
-	"name": "@genii/config",
-	"version": "1.0.0",
-	"description": "Configuration management for genii",
-	"type": "module",
-	"main": "./dist/config.js",
-	"types": "./dist/config.d.ts",
-	"exports": {
-		"./*": {
-			"import": "./dist/*.js",
-			"types": "./dist/*.d.ts"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsup",
-		"dev": "tsup --watch",
-		"check": "biome check .",
-		"check:fix": "biome check --write .",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest"
-	},
-	"keywords": [
-		"config",
-		"toml",
-		"secrets"
-	],
-	"author": "",
-	"license": "ISC",
-	"packageManager": "pnpm@10.24.0",
-	"dependencies": {
-		"@napi-rs/keyring": "^1.1.6",
-		"@sinclair/typebox": "^0.34.33",
-		"smol-toml": "^1.3.1"
-	},
-	"devDependencies": {
-		"@types/node": "^22.15.21",
-		"tsup": "8.5.1",
-		"typescript": "5.9.3",
-		"vitest": "^3.2.2"
-	}
+  "name": "@genii/config",
+  "version": "1.0.0",
+  "description": "Configuration management for genii",
+  "type": "module",
+  "main": "./dist/config.js",
+  "types": "./dist/config.d.ts",
+  "exports": {
+    "./*": {
+      "import": "./dist/*.js",
+      "types": "./dist/*.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "config",
+    "toml",
+    "secrets"
+  ],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.24.0",
+  "dependencies": {
+    "@napi-rs/keyring": "^1.1.6",
+    "@sinclair/typebox": "^0.34.33",
+    "smol-toml": "^1.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.2"
+  }
 }

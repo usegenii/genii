@@ -1,36 +1,36 @@
 {
-	"name": "@genii/guidance",
-	"version": "1.0.0",
-	"description": "Template guidance documents for the orchestrator system",
-	"type": "module",
-	"main": "./templates/index.js",
-	"types": "./templates/index.d.ts",
-	"exports": {
-		"./templates": {
-			"import": "./templates/index.js",
-			"types": "./templates/index.d.ts"
-		}
-	},
-	"files": [
-		"templates"
-	],
-	"scripts": {
-		"build": "tsup",
-		"check": "biome check .",
-		"check:fix": "biome check --write ."
-	},
-	"keywords": [
-		"ai",
-		"agents",
-		"guidance",
-		"templates"
-	],
-	"author": "",
-	"license": "ISC",
-	"packageManager": "pnpm@10.24.0",
-	"devDependencies": {
-		"@types/node": "^22.15.21",
-		"tsup": "8.5.1",
-		"typescript": "5.9.3"
-	}
+  "name": "@genii/guidance",
+  "version": "1.0.0",
+  "description": "Template guidance documents for the orchestrator system",
+  "type": "module",
+  "main": "./templates/index.js",
+  "types": "./templates/index.d.ts",
+  "exports": {
+    "./templates": {
+      "import": "./templates/index.js",
+      "types": "./templates/index.d.ts"
+    }
+  },
+  "files": [
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "guidance",
+    "templates"
+  ],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.24.0",
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
+  }
 }

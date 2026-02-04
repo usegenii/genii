@@ -1,55 +1,55 @@
 {
-	"name": "@genii/cli",
-	"version": "1.0.0",
-	"description": "CLI for managing genii agents",
-	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"bin": {
-		"genii": "./dist/genii.js"
-	},
-	"exports": {
-		".": {
-			"import": "./dist/index.js",
-			"types": "./dist/index.d.ts"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsup",
-		"dev": "tsx watch bin/genii.ts",
-		"check": "biome check .",
-		"check:fix": "biome check --write .",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest"
-	},
-	"keywords": [
-		"cli",
-		"ai",
-		"agents"
-	],
-	"author": "",
-	"license": "ISC",
-	"packageManager": "pnpm@10.24.0",
-	"dependencies": {
-		"@genii/config": "workspace:*",
-		"chalk": "^5.0.0",
-		"cli-table3": "^0.6.0",
-		"commander": "^12.0.0",
-		"ink": "^5.0.0",
-		"ink-select-input": "6.2.0",
-		"ink-text-input": "^6.0.0",
-		"ora": "^8.0.0",
-		"react": "^18.0.0"
-	},
-	"devDependencies": {
-		"@types/node": "^22.15.21",
-		"@types/react": "^18.0.0",
-		"tsup": "8.5.1",
-		"typescript": "5.9.3",
-		"vitest": "^3.2.2"
-	}
+  "name": "@genii/cli",
+  "version": "1.0.0",
+  "description": "CLI for managing genii agents",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "genii": "./dist/genii.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch bin/genii.ts",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "agents"
+  ],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.24.0",
+  "dependencies": {
+    "@genii/config": "workspace:*",
+    "chalk": "^5.0.0",
+    "cli-table3": "^0.6.0",
+    "commander": "^12.0.0",
+    "ink": "^5.0.0",
+    "ink-select-input": "6.2.0",
+    "ink-text-input": "^6.0.0",
+    "ora": "^8.0.0",
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^18.0.0",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.2"
+  }
 }
