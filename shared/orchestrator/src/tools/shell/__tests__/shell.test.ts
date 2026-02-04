@@ -93,7 +93,7 @@ describe('executeShellCommand', () => {
 		expect(result.exitCode).toBe(42);
 	});
 
-	it('should timeout long-running commands', { timeout: 15000 }, async () => {
+	it('should timeout long-running commands', async () => {
 		const result = await executeShellCommand({
 			command: 'sleep 10',
 			workingDirectory: process.cwd(),
@@ -106,7 +106,7 @@ describe('executeShellCommand', () => {
 		expect(result.exitCode).toBe(124);
 	});
 
-	it('should respect abort signal', { timeout: 15000 }, async () => {
+	it('should respect abort signal', async () => {
 		const controller = new AbortController();
 
 		// Abort after a short delay
@@ -205,7 +205,7 @@ describe('createShellTool', () => {
 		}
 	});
 
-	it('should include timed-out tag when command times out', { timeout: 15000 }, async () => {
+	it('should include timed-out tag when command times out', async () => {
 		const tool = createShellTool({ ...defaultConfig, defaultTimeout: 100 });
 		const context = createMockContext();
 

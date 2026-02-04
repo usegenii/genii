@@ -54,6 +54,7 @@ export async function executeShellCommand(options: ShellExecutorOptions): Promis
 		const child = spawn(shell, ['-c', command], {
 			cwd: workingDirectory,
 			env: process.env,
+			detached: true,
 		});
 
 		child.stdout?.on('data', (data: Buffer) => {
@@ -64,14 +65,30 @@ export async function executeShellCommand(options: ShellExecutorOptions): Promis
 			stderr += data.toString();
 		});
 
+		const killProcessGroup = (signal: NodeJS.Signals) => {
+			if (child.pid === undefined) {
+				return;
+			}
+			try {
+				// Kill the entire process group (negative PID)
+				process.kill(-child.pid, signal);
+			} catch (err) {
+				// ESRCH means process already exited, which is fine
+				if ((err as NodeJS.ErrnoException).code !== 'ESRCH') {
+					// Fallback to killing just the child
+					child.kill(signal);
+				}
+			}
+		};
+
 		const handleAbort = () => {
 			if (!resolved) {
 				timedOut = true;
-				child.kill('SIGTERM');
+				killProcessGroup('SIGTERM');
 				// Give process time to terminate gracefully, then force kill
 				setTimeout(() => {
 					if (!resolved) {
-						child.kill('SIGKILL');
+						killProcessGroup('SIGKILL');
 					}
 				}, 1000);
 			}
