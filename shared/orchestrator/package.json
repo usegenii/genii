@@ -3,19 +3,31 @@
 	"version": "1.0.0",
 	"description": "Core orchestrator system for managing autonomous AI agents",
 	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"exports": {
-		"./*": "./src/*.ts"
+		"./*": {
+			"import": "./dist/*.js",
+			"types": "./dist/*.d.ts"
+		}
 	},
+	"files": [
+		"dist"
+	],
 	"scripts": {
-		"build": "tsc",
-		"dev": "tsc --watch",
+		"build": "tsup",
+		"dev": "tsup --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
-	"keywords": [],
+	"keywords": [
+		"ai",
+		"agents",
+		"orchestrator"
+	],
 	"author": "",
 	"license": "ISC",
 	"packageManager": "pnpm@10.24.0",
@@ -27,6 +39,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.21",
+		"tsup": "8.5.1",
 		"typescript": "5.9.3",
 		"vitest": "^3.2.2"
 	}

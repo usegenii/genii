@@ -3,12 +3,20 @@
 	"version": "1.0.0",
 	"description": "Model factory bridging config and adapters for geniigotchi",
 	"type": "module",
+	"main": "./dist/factory.js",
+	"types": "./dist/factory.d.ts",
 	"exports": {
-		"./*": "./src/*.ts"
+		"./*": {
+			"import": "./dist/*.js",
+			"types": "./dist/*.d.ts"
+		}
 	},
+	"files": [
+		"dist"
+	],
 	"scripts": {
-		"build": "tsc",
-		"dev": "tsc --watch",
+		"build": "tsup",
+		"dev": "tsup --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit",
@@ -25,6 +33,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^22.15.21",
+		"tsup": "8.5.1",
 		"typescript": "5.9.3",
 		"vitest": "^3.2.2"
 	}

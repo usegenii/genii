@@ -2,32 +2,22 @@
  * Onboarding logic for copying template guidance files.
  *
  * This module handles:
- * - Locating template files (SOUL.md, INSTRUCTIONS.md, PULSE.md) in the @geniigotchi/guidance package
+ * - Inlined template files from the guidance package (bundled at build time)
  * - Checking for existing files in the guidance directory
- * - Copying templates with optional backup
+ * - Writing templates with optional backup
  */
 
-import { copyFile, mkdir, rename, stat } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { templates } from '@geniigotchi/guidance/templates';
 import type { Logger } from './logging/logger';
 import type { OnboardResult, OnboardStatus } from './rpc/methods';
 
 /**
  * Template files to copy during onboarding.
- * These are relative to the templates directory in @geniigotchi/guidance.
+ * These are the root-level template files.
  */
 const TEMPLATE_FILES = ['SOUL.md', 'INSTRUCTIONS.md', 'PULSE.md'];
-
-/**
- * Get the path to the templates directory in the guidance package.
- */
-function getTemplatesPath(): string {
-	// Use createRequire to resolve the package location
-	const require = createRequire(import.meta.url);
-	const guidancePackagePath = require.resolve('@geniigotchi/guidance/package.json');
-	return join(dirname(guidancePackagePath), 'templates');
-}
 
 /**
  * Check if a file exists.
@@ -58,9 +48,8 @@ export interface OnboardConfig {
  */
 export async function getOnboardStatus(config: OnboardConfig): Promise<OnboardStatus> {
 	const { guidancePath, logger } = config;
-	const templatesPath = getTemplatesPath();
 
-	logger.debug({ templatesPath, guidancePath }, 'Checking onboard status');
+	logger.debug({ guidancePath }, 'Checking onboard status');
 
 	const existing: string[] = [];
 
@@ -92,12 +81,12 @@ export interface OnboardExecuteOptions {
 /**
  * Execute the onboarding operation.
  *
- * Copies template files to the guidance directory, optionally creating backups.
+ * Writes template files to the guidance directory, optionally creating backups.
+ * Templates are inlined at build time from the @geniigotchi/guidance package.
  */
 export async function executeOnboard(config: OnboardConfig, options: OnboardExecuteOptions): Promise<OnboardResult> {
 	const { guidancePath, logger } = config;
 	const { backup, dryRun } = options;
-	const templatesPath = getTemplatesPath();
 
 	logger.info({ guidancePath, backup, dryRun }, 'Executing onboard');
 
@@ -111,17 +100,16 @@ export async function executeOnboard(config: OnboardConfig, options: OnboardExec
 	}
 
 	for (const file of TEMPLATE_FILES) {
-		const srcPath = join(templatesPath, file);
+		const content = templates.get(file);
+		if (!content) {
+			logger.warn({ file }, 'Template file not found in bundle, skipping');
+			continue;
+		}
+
 		const destPath = join(guidancePath, file);
 		const backupPath = `${destPath}.bak`;
 
-		logger.debug({ file, srcPath, destPath }, 'Processing template file');
-
-		// Check if source exists
-		if (!(await fileExists(srcPath))) {
-			logger.warn({ srcPath }, 'Template file not found, skipping');
-			continue;
-		}
+		logger.debug({ file, destPath }, 'Processing template file');
 
 		if (dryRun) {
 			skipped.push(file);
@@ -136,10 +124,10 @@ export async function executeOnboard(config: OnboardConfig, options: OnboardExec
 			backedUp.push(file);
 		}
 
-		// Copy the template file
-		await copyFile(srcPath, destPath);
+		// Write the template file
+		await writeFile(destPath, content, 'utf-8');
 		copied.push(file);
-		logger.debug({ file }, 'Copied template file');
+		logger.debug({ file }, 'Wrote template file');
 	}
 
 	logger.info({ copied, backedUp, skipped }, 'Onboard complete');

@@ -1,6 +1,15 @@
 # Geniigotchi
 
-A monorepo built with Turborepo, TypeScript, and Tauri.
+An autonomous AI agent platform that runs in the background, maintaining persistent conversations across multiple channels (Telegram, Discord, etc.). Think of it as a Tamagotchi for AI - a digital companion that lives on your machine, learns your preferences, and can be reached through various messaging platforms.
+
+## Features
+
+- **Persistent Agents**: AI agents that maintain conversation history and context across sessions
+- **Multi-Channel Support**: Connect to Telegram, Discord, and other messaging platforms
+- **Configurable Models**: Support for Anthropic, OpenAI, and Google AI models
+- **Guidance System**: Customize agent personality and behavior through markdown files
+- **Background Daemon**: Runs quietly in the background, always available
+- **CLI Control**: Full control over agents, channels, and configuration via command line
 
 ## Quick Start
 
@@ -89,20 +98,21 @@ cd apps/cli && pnpm tsx bin/genii.ts agent list
 
 ---
 
-## Structure
+## Project Structure
 
 ```
 geniigotchi/
 ├── apps/
-│   ├── cli/              # Command-line interface
-│   ├── daemon/           # Background daemon process
-│   └── desktop/          # Tauri desktop application
+│   ├── cli/              # @geniigotchi/cli - Command-line interface
+│   ├── daemon/           # @geniigotchi/daemon - Background daemon process
+│   └── desktop/          # Tauri desktop application (WIP)
 └── shared/
-    ├── comms/            # Communication channels (Telegram, Discord, etc.)
-    ├── config/           # Configuration loading and secret management
-    ├── lib/              # Shared library package
-    ├── models/           # Model factory (bridges config to adapters)
-    └── orchestrator/     # Agent orchestration and coordination
+    ├── comms/            # @geniigotchi/comms - Communication channels
+    ├── config/           # @geniigotchi/config - Configuration and secrets
+    ├── guidance/         # @geniigotchi/guidance - Template files
+    ├── lib/              # @geniigotchi/lib - Shared utilities
+    ├── models/           # @geniigotchi/models - Model factory
+    └── orchestrator/     # @geniigotchi/orchestrator - Agent orchestration
 ```
 
 ## Configuration
@@ -140,8 +150,8 @@ OpenAI and Google models only support `off`.
 
 - [pnpm](https://pnpm.io/) - Package manager
 - [Turbo](https://turbo.build/) - Build system
-- [Node.js](https://nodejs.org/) - Runtime (v18+ recommended)
-- [Rust](https://www.rust-lang.org/) - For Tauri desktop app
+- [Node.js](https://nodejs.org/) - Runtime (v20+ recommended)
+- [Rust](https://www.rust-lang.org/) - For Tauri desktop app (optional)
 
 ## Installation
 
@@ -188,60 +198,6 @@ pnpm build
 turbo run build
 ```
 
-## Individual Package Commands
-
-### Desktop App (Tauri)
-
-```bash
-# Run development server
-cd apps/desktop
-pnpm dev
-
-# Build for production
-cd apps/desktop
-pnpm build
-
-# Tauri CLI commands
-cd apps/desktop
-pnpm tauri <command>
-```
-
-### Shared Lib
-
-```bash
-cd shared/lib
-
-# Type check
-pnpm check
-
-# Auto-fix issues
-pnpm check:fix
-
-# Build
-pnpm build
-
-# Watch mode
-pnpm dev
-```
-
-### Shared Orchestrator
-
-```bash
-cd shared/orchestrator
-
-# Type check
-pnpm check
-
-# Auto-fix issues
-pnpm check:fix
-
-# Build
-pnpm build
-
-# Watch mode
-pnpm dev
-```
-
 ## Code Quality
 
 This project uses [Biome](https://biomejs.dev/) for:
@@ -252,14 +208,53 @@ This project uses [Biome](https://biomejs.dev/) for:
 
 Configuration is in `biome.json` at the root. All packages use this single config.
 
-## Turborepo
+## Publishing to npm
 
-This project uses Turborepo for:
+### Prerequisites
 
-- Task orchestration
-- Caching
-- Remote cache (optional, configured in `turbo.json`)
+1. **npm account**: Create an account at https://www.npmjs.com
+2. **npm org**: Create the `@geniigotchi` organization at https://www.npmjs.com/org/create
+3. **Login**: Run `npm login` to authenticate
 
-Available tasks: `build`, `check`, `check:fix`, `dev`
+### Package Overview
 
-See `turbo.json` for configuration.
+| Package | Description |
+|---------|-------------|
+| `geniigotchi` | Meta-package (installs CLI + daemon) |
+| `@geniigotchi/cli` | CLI binary (`genii` command) |
+| `@geniigotchi/daemon` | Daemon binary (`geniigotchi-daemon` command) |
+| `@geniigotchi/config` | Configuration management |
+| `@geniigotchi/models` | Model factory |
+| `@geniigotchi/orchestrator` | Agent orchestration |
+| `@geniigotchi/comms` | Messaging adapters |
+| `@geniigotchi/guidance` | Template files |
+| `@geniigotchi/lib` | Shared utilities |
+
+### Publish All Packages
+
+The `scripts/publish-all.sh` script automates publishing all packages in the correct dependency order. It:
+
+1. Reads the version from the root `package.json` and syncs it to all nested packages
+2. Runs pre-publish checks (build, lint, test)
+3. Publishes shared packages first (lib, config, comms, orchestrator, guidance)
+4. Publishes models (depends on config + orchestrator)
+5. Publishes apps (cli, daemon)
+6. Publishes the root meta-package (auto-converts `workspace:*` to version numbers)
+
+```bash
+# Dry run (test without publishing)
+pnpm publish:dry-run
+
+# Publish for real
+pnpm publish:all
+
+# Skip pre-publish checks (build, lint, test)
+./scripts/publish-all.sh --skip-checks
+```
+
+### Version Management
+
+All packages share the same version. To release a new version:
+
+1. Update the version in the root `package.json`
+2. Run `pnpm publish:all` (the script auto-syncs the version to all nested packages)

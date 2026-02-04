@@ -1,23 +1,37 @@
 {
 	"name": "@geniigotchi/lib",
 	"version": "1.0.0",
-	"description": "",
+	"description": "Shared utilities for geniigotchi",
+	"type": "module",
 	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		},
+		"./*": {
+			"import": "./dist/*.js",
+			"types": "./dist/*.d.ts"
+		}
+	},
+	"files": [
+		"dist"
+	],
 	"scripts": {
-		"test": "echo \"No tests\"",
-		"build": "tsc",
-		"dev": "tsc --watch",
+		"build": "tsup",
+		"dev": "tsup --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "echo \"No tests\""
 	},
 	"keywords": [],
 	"author": "",
 	"license": "ISC",
 	"packageManager": "pnpm@10.24.0",
-	"type": "module",
-	"types": "./dist/index.d.ts",
 	"devDependencies": {
+		"tsup": "8.5.1",
 		"typescript": "5.9.3"
 	}
 }

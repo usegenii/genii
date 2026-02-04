@@ -1,20 +1,38 @@
 {
 	"name": "geniigotchi",
 	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
+	"description": "CLI and daemon for managing AI agents and communication channels",
+	"type": "module",
+	"bin": {
+		"genii": "./node_modules/@geniigotchi/cli/dist/genii.js",
+		"geniigotchi-daemon": "./node_modules/@geniigotchi/daemon/dist/daemon.js"
+	},
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
+		"build": "turbo run build",
+		"dev": "turbo run dev",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
-		"typecheck": "turbo run typecheck"
+		"typecheck": "turbo run typecheck",
+		"test": "turbo run test",
+		"prepublishOnly": "pnpm build",
+		"publish:all": "./scripts/publish-all.sh",
+		"publish:dry-run": "./scripts/publish-all.sh --dry-run"
 	},
-	"keywords": [],
+	"keywords": [
+		"ai",
+		"agents",
+		"cli",
+		"daemon"
+	],
 	"author": "",
-	"license": "ISC",
 	"packageManager": "pnpm@10.24.0",
+	"dependencies": {
+		"@geniigotchi/cli": "workspace:*",
+		"@geniigotchi/daemon": "workspace:*"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.12",
+		"tsup": "8.5.1",
 		"tsx": "4.21.0",
 		"turbo": "2.7.6"
 	}
