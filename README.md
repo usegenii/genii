@@ -220,7 +220,7 @@ Configuration is in `biome.json` at the root. All packages use this single confi
 
 | Package | Description |
 |---------|-------------|
-| `genii` | Meta-package (installs CLI + daemon) |
+| `usegenii` | Meta-package (installs CLI + daemon) |
 | `@genii/cli` | CLI binary (`genii` command) |
 | `@genii/daemon` | Daemon binary (`genii-daemon` command) |
 | `@genii/config` | Configuration management |
