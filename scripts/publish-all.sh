@@ -106,15 +106,56 @@ if ! $SKIP_CHECKS; then
     echo ""
 fi
 
-# Publish function
+# Publish function - resolves workspace:* references before publishing
 publish_package() {
     local dir=$1
     local name=$2
 
     echo "Publishing $name..."
     cd "$ROOT_DIR/$dir"
+
+    # Replace workspace:* with actual versions before publishing
+    if grep -q '"workspace:\*"' package.json; then
+        cp package.json package.json.bak
+        node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const pkg = require('./package.json');
+            const rootDir = '$ROOT_DIR';
+
+            // Map package names to their directories
+            const pkgDirs = {
+                '@genii/lib': 'shared/lib',
+                '@genii/config': 'shared/config',
+                '@genii/comms': 'shared/comms',
+                '@genii/orchestrator': 'shared/orchestrator',
+                '@genii/guidance': 'shared/guidance',
+                '@genii/models': 'shared/models',
+                '@genii/cli': 'apps/cli',
+                '@genii/daemon': 'apps/daemon'
+            };
+
+            if (pkg.dependencies) {
+                for (const [dep, version] of Object.entries(pkg.dependencies)) {
+                    if (version === 'workspace:*' && pkgDirs[dep]) {
+                        const depPkg = require(path.join(rootDir, pkgDirs[dep], 'package.json'));
+                        pkg.dependencies[dep] = '^' + depPkg.version;
+                    }
+                }
+            }
+
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, '\t') + '\n');
+        "
+    fi
+
     # shellcheck disable=SC2086
     npm publish $PUBLISH_FLAGS
+
+    # Restore original package.json if we modified it
+    if [[ -f package.json.bak ]]; then
+        mv package.json.bak package.json
+    fi
+
     cd "$ROOT_DIR"
     echo ""
 }
