@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-PUBLISH_FLAGS="--access public"
+PUBLISH_FLAGS="--access public --provenance"
 if $DRY_RUN; then
     PUBLISH_FLAGS="$PUBLISH_FLAGS --dry-run"
     echo "=== DRY RUN MODE ==="

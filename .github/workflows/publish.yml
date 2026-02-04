@@ -54,3 +54,4 @@ jobs:
         run: ./scripts/publish-all.sh --skip-checks
         env:
           NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ""
