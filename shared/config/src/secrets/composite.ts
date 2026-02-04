@@ -1,80 +1,51 @@
 import { join } from 'node:path';
 import { FileSecretStore } from './file.js';
 import { KeychainSecretStore } from './keychain.js';
-import type { SecretResult, SecretStore } from './types.js';
+import type { SecretStore } from './types.js';
 
 /**
- * Composite secret store that chains multiple SecretStore implementations.
- * Provides fallback behavior for reads and writes to all stores for redundancy.
+ * Check if the native secret store (Keychain/Credential Manager/libsecret) is available.
+ * This probes by attempting a read operation - if the backend isn't available, it will throw.
  */
-export class CompositeSecretStore implements SecretStore {
-	private readonly stores: SecretStore[];
-
-	/**
-	 * Create a new CompositeSecretStore
-	 * @param stores - Array of SecretStore instances to chain (tried in order for reads)
-	 */
-	constructor(stores: SecretStore[]) {
-		this.stores = stores;
-	}
-
-	/**
-	 * Retrieve a secret by trying each store in order.
-	 * Returns the first successful result, or the last error if all fail.
-	 * @param name - The name of the secret to retrieve
-	 * @returns A SecretResult indicating success with the value, or failure with an error message
-	 */
-	async get(name: string): Promise<SecretResult> {
-		let lastError = `No secret stores configured`;
-
-		for (const store of this.stores) {
-			const result = await store.get(name);
-			if (result.success) {
-				return result;
-			}
-			lastError = result.error;
-		}
-
-		return { success: false, error: lastError };
-	}
-
-	/**
-	 * Store a secret in all configured stores.
-	 * Returns success if at least one store succeeds.
-	 * @param name - The name of the secret to store
-	 * @param value - The secret value to store
-	 * @returns A SecretResult indicating success, or failure with combined error messages
-	 */
-	async set(name: string, value: string): Promise<SecretResult> {
-		const errors: string[] = [];
-		let succeeded = false;
-
-		for (const store of this.stores) {
-			const result = await store.set(name, value);
-			if (result.success) {
-				succeeded = true;
-			} else {
-				errors.push(result.error);
-			}
-		}
-
-		if (succeeded) {
-			return { success: true, value };
-		}
-
-		return { success: false, error: errors.join('; ') };
+async function isNativeSecretStoreAvailable(serviceName: string): Promise<boolean> {
+	try {
+		const store = new KeychainSecretStore(serviceName);
+		// Try to read a non-existent key - this will fail with "not found" if the store works,
+		// or throw an error if the backend isn't available
+		const result = await store.get('__probe__');
+		// If we get here, the store is available (even if the key wasn't found)
+		return result.success || result.error.includes('not found');
+	} catch {
+		// Backend not available (e.g., no libsecret on headless Linux)
+		return false;
 	}
 }
 
 /**
- * Create a default secret store with keychain as primary and file as fallback.
- * @param basePath - Base directory path for the file-based fallback storage
- * @param serviceName - Service name for keychain namespace (e.g., 'geniigotchi')
- * @returns A CompositeSecretStore configured with keychain first, then file fallback
+ * Create a secret store appropriate for the current platform.
+ *
+ * Platform behavior:
+ * - macOS: Uses Keychain (always available)
+ * - Windows: Uses Windows Credential Manager (always available)
+ * - Linux: Uses libsecret via D-Bus Secret Service if available, otherwise falls back to file
+ *
+ * @param basePath - Base directory path for file-based fallback storage (used only if native store unavailable)
+ * @param serviceName - Service name for native store namespace (e.g., 'geniigotchi')
+ * @returns A SecretStore instance appropriate for the platform
  */
-export function createDefaultSecretStore(basePath: string, serviceName: string): CompositeSecretStore {
-	const keychainStore = new KeychainSecretStore(serviceName);
-	const fileStore = new FileSecretStore(join(basePath, 'secrets.json'));
+export async function createSecretStore(basePath: string, serviceName: string): Promise<SecretStore> {
+	// On macOS and Windows, native stores are always available
+	// On Linux, we need to check for libsecret/D-Bus Secret Service
+	if (process.platform === 'darwin' || process.platform === 'win32') {
+		return new KeychainSecretStore(serviceName);
+	}
 
-	return new CompositeSecretStore([keychainStore, fileStore]);
+	// Linux or other platforms - check if native store is available
+	const nativeAvailable = await isNativeSecretStoreAvailable(serviceName);
+	if (nativeAvailable) {
+		return new KeychainSecretStore(serviceName);
+	}
+
+	// Fall back to file-based storage (headless Linux, containers, CI, etc.)
+	return new FileSecretStore(join(basePath, 'secrets.json'));
 }

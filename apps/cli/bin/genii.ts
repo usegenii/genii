@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 /**
  * Binary entry point for the genii CLI.
  * @module bin/genii

@@ -2,7 +2,7 @@
  * Onboarding logic for copying template guidance files.
  *
  * This module handles:
- * - Locating template files in the @geniigotchi/guidance package
+ * - Locating template files (SOUL.md, INSTRUCTIONS.md, PULSE.md) in the @geniigotchi/guidance package
  * - Checking for existing files in the guidance directory
  * - Copying templates with optional backup
  */
@@ -17,7 +17,7 @@ import type { OnboardResult, OnboardStatus } from './rpc/methods';
  * Template files to copy during onboarding.
  * These are relative to the templates directory in @geniigotchi/guidance.
  */
-const TEMPLATE_FILES = ['SOUL.md', 'INSTRUCTIONS.md'];
+const TEMPLATE_FILES = ['SOUL.md', 'INSTRUCTIONS.md', 'PULSE.md'];
 
 /**
  * Get the path to the templates directory in the guidance package.

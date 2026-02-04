@@ -20,7 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '@geniigotchi/config/config';
-import { createDefaultSecretStore } from '@geniigotchi/config/secrets/composite';
+import { createSecretStore } from '@geniigotchi/config/secrets/composite';
 import { createModelFactory } from '@geniigotchi/models/factory';
 import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
@@ -287,7 +287,7 @@ export async function main(): Promise<void> {
 	const config = await loadConfig({ basePath: dataPath });
 
 	// Create secret store
-	const secretStore = createDefaultSecretStore(dataPath, 'geniigotchi');
+	const secretStore = await createSecretStore(dataPath, 'geniigotchi');
 
 	// Create model factory
 	const modelFactory = createModelFactory({ config, secretStore });
