@@ -38,8 +38,8 @@ class AsyncEventQueue<T> {
 	 */
 	push(item: T): void {
 		if (this.closed) return;
-		if (this.waiters.length > 0) {
-			const resolve = this.waiters.shift()!;
+		const resolve = this.waiters.shift();
+		if (resolve) {
 			resolve(item);
 		} else {
 			this.queue.push(item);
@@ -50,8 +50,9 @@ class AsyncEventQueue<T> {
 	 * Pull the next event from the queue. Returns null when the queue is closed and empty.
 	 */
 	async pull(): Promise<T | null> {
-		if (this.queue.length > 0) {
-			return this.queue.shift()!;
+		const item = this.queue.shift();
+		if (item !== undefined) {
+			return item;
 		}
 		if (this.closed) return null;
 		return new Promise((resolve) => this.waiters.push(resolve));

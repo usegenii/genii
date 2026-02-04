@@ -1,46 +1,46 @@
 {
-  "name": "@genii/orchestrator",
-  "version": "1.0.0",
-  "description": "Core orchestrator system for managing autonomous AI agents",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    "./*": {
-      "import": "./dist/*.js",
-      "types": "./dist/*.d.ts"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "check": "biome check .",
-    "check:fix": "biome check --write .",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "keywords": [
-    "ai",
-    "agents",
-    "orchestrator"
-  ],
-  "author": "",
-  "license": "MIT",
-  "packageManager": "pnpm@10.24.0",
-  "dependencies": {
-    "@mariozechner/pi-agent-core": "^0.49.3",
-    "@mariozechner/pi-ai": "^0.49.3",
-    "@sinclair/typebox": "^0.34.33",
-    "chrono-node": "^2.9.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.15.21",
-    "tsup": "8.5.1",
-    "typescript": "5.9.3",
-    "vitest": "^3.2.2"
-  }
+	"name": "@genii/orchestrator",
+	"version": "1.0.0",
+	"description": "Core orchestrator system for managing autonomous AI agents",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		"./*": {
+			"import": "./dist/*.js",
+			"types": "./dist/*.d.ts"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"dev": "tsup --watch",
+		"check": "biome check .",
+		"check:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"keywords": [
+		"ai",
+		"agents",
+		"orchestrator"
+	],
+	"author": "",
+	"license": "MIT",
+	"packageManager": "pnpm@10.24.0",
+	"dependencies": {
+		"@mariozechner/pi-agent-core": "^0.49.3",
+		"@mariozechner/pi-ai": "^0.49.3",
+		"@sinclair/typebox": "^0.34.33",
+		"chrono-node": "^2.9.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.21",
+		"tsup": "8.5.1",
+		"typescript": "5.9.3",
+		"vitest": "^3.2.2"
+	}
 }
