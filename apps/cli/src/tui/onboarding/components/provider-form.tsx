@@ -3,7 +3,7 @@
  * @module tui/onboarding/components/provider-form
  */
 
-import type { SetupField } from '@geniigotchi/config/providers/types';
+import type { SetupField } from '@genii/config/providers/types';
 import { Box } from 'ink';
 import type React from 'react';
 import { FormField } from './form-field';

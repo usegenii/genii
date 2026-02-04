@@ -19,9 +19,9 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { loadConfig } from '@geniigotchi/config/config';
-import { createSecretStore } from '@geniigotchi/config/secrets/composite';
-import { createModelFactory } from '@geniigotchi/models/factory';
+import { loadConfig } from '@genii/config/config';
+import { createSecretStore } from '@genii/config/secrets/composite';
+import { createModelFactory } from '@genii/models/factory';
 import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
 import { type CreateDaemonOptions, createDaemon } from './factory';
@@ -36,13 +36,13 @@ const HARD_SHUTDOWN_INTERVAL_MS = 3000;
 function getDefaultDataPath(): string {
 	const home = homedir();
 	if (process.platform === 'darwin') {
-		return join(home, 'Library', 'Application Support', 'geniigotchi');
+		return join(home, 'Library', 'Application Support', 'genii');
 	}
 	if (process.platform === 'win32') {
-		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'geniigotchi');
+		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'genii');
 	}
 	// Linux/Unix - use XDG_DATA_HOME or fallback
-	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'geniigotchi');
+	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'genii');
 }
 
 /**
@@ -119,9 +119,9 @@ function parseArguments(): ParsedArgs {
  */
 function printHelp(): void {
 	console.log(`
-geniigotchi-daemon - Background daemon for managing AI agents
+genii-daemon - Background daemon for managing AI agents
 
-Usage: geniigotchi-daemon [options]
+Usage: genii-daemon [options]
 
 Options:
   -s, --socket <path>      Override socket path for IPC
@@ -131,10 +131,10 @@ Options:
   -h, --help               Show this help message
 
 Examples:
-  geniigotchi-daemon
-  geniigotchi-daemon --log-level debug
-  geniigotchi-daemon --socket /tmp/custom.sock
-  geniigotchi-daemon --data ~/.local/share/geniigotchi
+  genii-daemon
+  genii-daemon --log-level debug
+  genii-daemon --socket /tmp/custom.sock
+  genii-daemon --data ~/.local/share/genii
 `);
 }
 
@@ -277,7 +277,7 @@ export async function main(): Promise<void> {
 	// Set up error handlers
 	setupErrorHandlers(logger);
 
-	logger.info('Starting geniigotchi daemon');
+	logger.info('Starting genii daemon');
 
 	// Determine data path (use default if not specified)
 	const dataPath = args.dataPath ?? getDefaultDataPath();
@@ -287,7 +287,7 @@ export async function main(): Promise<void> {
 	const config = await loadConfig({ basePath: dataPath });
 
 	// Create secret store
-	const secretStore = await createSecretStore(dataPath, 'geniigotchi');
+	const secretStore = await createSecretStore(dataPath, 'genii');
 
 	// Create model factory
 	const modelFactory = createModelFactory({ config, secretStore });

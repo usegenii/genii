@@ -1,6 +1,6 @@
-# Geniigotchi
+# Genii
 
-An autonomous AI agent platform that runs in the background, maintaining persistent conversations across multiple channels (Telegram, Discord, etc.). Think of it as a Tamagotchi for AI - a digital companion that lives on your machine, learns your preferences, and can be reached through various messaging platforms.
+An autonomous AI agent platform that runs in the background, maintaining persistent conversations across multiple channels (Telegram, Discord, etc.). A digital companion that lives on your machine, learns your preferences, and can be reached through various messaging platforms.
 
 ## Features
 
@@ -24,10 +24,10 @@ pnpm install
 Create the configuration directory:
 
 ```bash
-mkdir -p ~/.config/geniigotchi/guidance
+mkdir -p ~/.config/genii/guidance
 ```
 
-Create `~/.config/geniigotchi/providers.toml`:
+Create `~/.config/genii/providers.toml`:
 
 ```toml
 [anthropic]
@@ -36,7 +36,7 @@ base-url = "https://api.anthropic.com"
 credential = "secret:anthropic-api-key"
 ```
 
-Create `~/.config/geniigotchi/models.toml`:
+Create `~/.config/genii/models.toml`:
 
 ```toml
 [sonnet]
@@ -55,10 +55,10 @@ thinking-level = "medium"
 On macOS, store your API key in the system keychain:
 
 ```bash
-security add-generic-password -s geniigotchi -a anthropic-api-key -w "sk-ant-your-key-here"
+security add-generic-password -s genii -a anthropic-api-key -w "sk-ant-your-key-here"
 ```
 
-On Linux, create a secrets file at `~/.config/geniigotchi/secrets.json`:
+On Linux, create a secrets file at `~/.config/genii/secrets.json`:
 
 ```json
 {
@@ -68,7 +68,7 @@ On Linux, create a secrets file at `~/.config/geniigotchi/secrets.json`:
 
 ### 4. Create Minimal Guidance
 
-Create `~/.config/geniigotchi/guidance/SOUL.md`:
+Create `~/.config/genii/guidance/SOUL.md`:
 
 ```markdown
 You are a helpful assistant.
@@ -101,18 +101,18 @@ cd apps/cli && pnpm tsx bin/genii.ts agent list
 ## Project Structure
 
 ```
-geniigotchi/
+genii/
 ├── apps/
-│   ├── cli/              # @geniigotchi/cli - Command-line interface
-│   ├── daemon/           # @geniigotchi/daemon - Background daemon process
+│   ├── cli/              # @genii/cli - Command-line interface
+│   ├── daemon/           # @genii/daemon - Background daemon process
 │   └── desktop/          # Tauri desktop application (WIP)
 └── shared/
-    ├── comms/            # @geniigotchi/comms - Communication channels
-    ├── config/           # @geniigotchi/config - Configuration and secrets
-    ├── guidance/         # @geniigotchi/guidance - Template files
-    ├── lib/              # @geniigotchi/lib - Shared utilities
-    ├── models/           # @geniigotchi/models - Model factory
-    └── orchestrator/     # @geniigotchi/orchestrator - Agent orchestration
+    ├── comms/            # @genii/comms - Communication channels
+    ├── config/           # @genii/config - Configuration and secrets
+    ├── guidance/         # @genii/guidance - Template files
+    ├── lib/              # @genii/lib - Shared utilities
+    ├── models/           # @genii/models - Model factory
+    └── orchestrator/     # @genii/orchestrator - Agent orchestration
 ```
 
 ## Configuration
@@ -125,7 +125,7 @@ Models are referenced using the format `provider/model-name`. For example:
 
 ### Configuration Files
 
-All configuration files are stored in `~/.config/geniigotchi/` (Linux/macOS) or `%APPDATA%/geniigotchi/` (Windows).
+All configuration files are stored in `~/.config/genii/` (Linux/macOS) or `%APPDATA%/genii/` (Windows).
 
 | File | Description |
 |------|-------------|
@@ -213,22 +213,22 @@ Configuration is in `biome.json` at the root. All packages use this single confi
 ### Prerequisites
 
 1. **npm account**: Create an account at https://www.npmjs.com
-2. **npm org**: Create the `@geniigotchi` organization at https://www.npmjs.com/org/create
+2. **npm org**: Create the `@genii` organization at https://www.npmjs.com/org/create
 3. **Login**: Run `npm login` to authenticate
 
 ### Package Overview
 
 | Package | Description |
 |---------|-------------|
-| `geniigotchi` | Meta-package (installs CLI + daemon) |
-| `@geniigotchi/cli` | CLI binary (`genii` command) |
-| `@geniigotchi/daemon` | Daemon binary (`geniigotchi-daemon` command) |
-| `@geniigotchi/config` | Configuration management |
-| `@geniigotchi/models` | Model factory |
-| `@geniigotchi/orchestrator` | Agent orchestration |
-| `@geniigotchi/comms` | Messaging adapters |
-| `@geniigotchi/guidance` | Template files |
-| `@geniigotchi/lib` | Shared utilities |
+| `genii` | Meta-package (installs CLI + daemon) |
+| `@genii/cli` | CLI binary (`genii` command) |
+| `@genii/daemon` | Daemon binary (`genii-daemon` command) |
+| `@genii/config` | Configuration management |
+| `@genii/models` | Model factory |
+| `@genii/orchestrator` | Agent orchestration |
+| `@genii/comms` | Messaging adapters |
+| `@genii/guidance` | Template files |
+| `@genii/lib` | Shared utilities |
 
 ### Publish All Packages
 

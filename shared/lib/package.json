@@ -1,7 +1,7 @@
 {
-	"name": "@geniigotchi/lib",
+	"name": "@genii/lib",
 	"version": "1.0.0",
-	"description": "Shared utilities for geniigotchi",
+	"description": "Shared utilities for genii",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

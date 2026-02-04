@@ -2,10 +2,10 @@
  * Channel factory types for creating channels from configuration.
  */
 
-import type { Channel } from '@geniigotchi/comms/channel/types';
-import type { Logger } from '@geniigotchi/comms/logging/types';
-import type { SecretStore } from '@geniigotchi/config/secrets/types';
-import type { ChannelConfig } from '@geniigotchi/config/types/channel';
+import type { Channel } from '@genii/comms/channel/types';
+import type { Logger } from '@genii/comms/logging/types';
+import type { SecretStore } from '@genii/config/secrets/types';
+import type { ChannelConfig } from '@genii/config/types/channel';
 
 /**
  * Factory interface for creating channels from configuration.

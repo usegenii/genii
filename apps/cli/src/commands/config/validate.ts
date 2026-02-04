@@ -45,7 +45,7 @@ export function validateCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'geniigotchi');
+			const basePath = join(homedir(), '.config', 'genii');
 			const results: Array<{ name: string; file: string; valid: boolean; error?: string; exists: boolean }> = [];
 			let hasErrors = false;
 
@@ -101,7 +101,7 @@ export function validateCommand(config: Command): void {
 
 				try {
 					// Dynamically import the config module
-					const { loadConfig } = await import('@geniigotchi/config/config');
+					const { loadConfig } = await import('@genii/config/config');
 					await loadConfig({ basePath });
 
 					results.push({

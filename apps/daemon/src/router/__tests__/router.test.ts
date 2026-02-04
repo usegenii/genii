@@ -2,16 +2,16 @@
  * Tests for MessageRouter toolRegistry passing to coordinator.continue().
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { InboundEvent } from '@geniigotchi/comms/events/types';
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { ChannelId } from '@geniigotchi/comms/types/core';
-import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
-import type { AgentHandle } from '@geniigotchi/orchestrator/handle/types';
-import type { AgentCheckpoint } from '@geniigotchi/orchestrator/snapshot/types';
-import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
-import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
+import type { Destination } from '@genii/comms/destination/types';
+import type { InboundEvent } from '@genii/comms/events/types';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { ChannelId } from '@genii/comms/types/core';
+import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { AgentHandle } from '@genii/orchestrator/handle/types';
+import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
 import type { ConversationBinding } from '../../conversations/types';

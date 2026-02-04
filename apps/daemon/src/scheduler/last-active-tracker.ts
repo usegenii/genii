@@ -7,7 +7,7 @@
 
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Destination } from '@geniigotchi/comms/destination/types';
+import type { Destination } from '@genii/comms/destination/types';
 import type { Logger } from '../logging/logger';
 import type { LastActiveState } from './jobs/types';
 

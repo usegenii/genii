@@ -4,10 +4,10 @@
  * Loads channel configuration and creates channel instances.
  */
 
-import { ChannelRegistryImpl } from '@geniigotchi/comms/registry/impl';
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { Config } from '@geniigotchi/config/config';
-import type { SecretStore } from '@geniigotchi/config/secrets/types';
+import { ChannelRegistryImpl } from '@genii/comms/registry/impl';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { Config } from '@genii/config/config';
+import type { SecretStore } from '@genii/config/secrets/types';
 import type { Logger } from '../logging/logger';
 import { ChannelFactoryRegistry } from './factory';
 import { TelegramChannelFactory } from './telegram';

@@ -4,8 +4,8 @@
  * Types for the scheduled job system that runs periodic tasks like pulse sessions.
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { PulseConfig, SchedulerConfig, SchedulerDestination } from '@geniigotchi/config/types/preferences';
+import type { Destination } from '@genii/comms/destination/types';
+import type { PulseConfig, SchedulerConfig, SchedulerDestination } from '@genii/config/types/preferences';
 import type { Cron } from 'croner';
 
 export type { PulseConfig, SchedulerConfig, SchedulerDestination };

@@ -1,5 +1,5 @@
 {
-	"name": "@geniigotchi/guidance",
+	"name": "@genii/guidance",
 	"version": "1.0.0",
 	"description": "Template guidance documents for the orchestrator system",
 	"type": "module",

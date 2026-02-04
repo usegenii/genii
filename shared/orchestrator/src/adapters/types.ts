@@ -17,10 +17,10 @@ export interface AgentAdapter {
 	/** Name of this adapter */
 	readonly name: string;
 
-	/** Geniigotchi provider name (for checkpointing) */
+	/** Genii provider name (for checkpointing) */
 	readonly modelProvider: string;
 
-	/** Geniigotchi model name/ID (for checkpointing) */
+	/** Genii model name/ID (for checkpointing) */
 	readonly modelName: string;
 
 	/**

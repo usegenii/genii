@@ -9,7 +9,7 @@ export class KeychainSecretStore implements SecretStore {
 
 	/**
 	 * Create a new KeychainSecretStore
-	 * @param serviceName - The service name used to namespace secrets in the keychain (e.g., 'geniigotchi')
+	 * @param serviceName - The service name used to namespace secrets in the keychain (e.g., 'genii')
 	 */
 	constructor(serviceName: string) {
 		this.serviceName = serviceName;

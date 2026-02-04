@@ -1,7 +1,7 @@
 {
-	"name": "@geniigotchi/config",
+	"name": "@genii/config",
 	"version": "1.0.0",
-	"description": "Configuration management for geniigotchi",
+	"description": "Configuration management for genii",
 	"type": "module",
 	"main": "./dist/config.js",
 	"types": "./dist/config.d.ts",

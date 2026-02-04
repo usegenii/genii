@@ -8,15 +8,15 @@
  * - Managing event subscriptions and delivery
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { CommandReceivedEvent, InboundEvent } from '@geniigotchi/comms/events/types';
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { ChannelId, Disposable } from '@geniigotchi/comms/types/core';
-import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
-import type { AgentEvent, CoordinatorEvent } from '@geniigotchi/orchestrator/events/types';
-import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
-import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@geniigotchi/orchestrator/types/core';
+import type { Destination } from '@genii/comms/destination/types';
+import type { CommandReceivedEvent, InboundEvent } from '@genii/comms/events/types';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { ChannelId, Disposable } from '@genii/comms/types/core';
+import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { AgentEvent, CoordinatorEvent } from '@genii/orchestrator/events/types';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@genii/orchestrator/types/core';
 import type { CommandExecutorInterface } from '../commands/executor';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';

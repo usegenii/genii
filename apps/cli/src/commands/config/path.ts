@@ -44,7 +44,7 @@ export function pathCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'geniigotchi');
+			const basePath = join(homedir(), '.config', 'genii');
 
 			// Check which files exist
 			const files: Array<{ name: string; file: string; path: string; exists: boolean }> = [];

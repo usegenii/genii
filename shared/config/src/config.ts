@@ -12,7 +12,7 @@ import type { ProviderConfig } from './types/provider.js';
 /**
  * Default base path for configuration files
  */
-const DEFAULT_BASE_PATH = join(homedir(), '.config', 'geniigotchi');
+const DEFAULT_BASE_PATH = join(homedir(), '.config', 'genii');
 
 /**
  * Options for loading configuration

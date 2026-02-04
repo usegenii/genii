@@ -1,12 +1,12 @@
 {
-	"name": "@geniigotchi/daemon",
+	"name": "@genii/daemon",
 	"version": "1.0.0",
 	"description": "Background daemon for managing AI agents and communication channels",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"bin": {
-		"geniigotchi-daemon": "./dist/daemon.js"
+		"genii-daemon": "./dist/daemon.js"
 	},
 	"exports": {
 		".": {
@@ -35,11 +35,11 @@
 	"license": "ISC",
 	"packageManager": "pnpm@10.24.0",
 	"dependencies": {
-		"@geniigotchi/comms": "workspace:*",
-		"@geniigotchi/config": "workspace:*",
-		"@geniigotchi/guidance": "workspace:*",
-		"@geniigotchi/models": "workspace:*",
-		"@geniigotchi/orchestrator": "workspace:*",
+		"@genii/comms": "workspace:*",
+		"@genii/config": "workspace:*",
+		"@genii/guidance": "workspace:*",
+		"@genii/models": "workspace:*",
+		"@genii/orchestrator": "workspace:*",
 		"croner": "^9.0.0",
 		"pino": "^9.0.0",
 		"pino-pretty": "^11.0.0"

@@ -13,5 +13,5 @@ export default defineConfig({
 	clean: true,
 	treeshake: true,
 	// Don't bundle external npm packages or workspace packages
-	external: [/^@geniigotchi\//, /^[^./]/],
+	external: [/^@genii\//, /^[^./]/],
 });

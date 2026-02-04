@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Geniigotchi Package Publisher
+# Genii Package Publisher
 # Publishes all packages to npm in the correct dependency order
 # Automatically syncs version from root package.json to all nested packages
 
@@ -120,18 +120,18 @@ publish_package() {
 }
 
 echo "=== Step 1: Publishing shared packages (no internal deps) ==="
-publish_package "shared/lib" "@geniigotchi/lib"
-publish_package "shared/config" "@geniigotchi/config"
-publish_package "shared/comms" "@geniigotchi/comms"
-publish_package "shared/orchestrator" "@geniigotchi/orchestrator"
-publish_package "shared/guidance" "@geniigotchi/guidance"
+publish_package "shared/lib" "@genii/lib"
+publish_package "shared/config" "@genii/config"
+publish_package "shared/comms" "@genii/comms"
+publish_package "shared/orchestrator" "@genii/orchestrator"
+publish_package "shared/guidance" "@genii/guidance"
 
 echo "=== Step 2: Publishing models (depends on config + orchestrator) ==="
-publish_package "shared/models" "@geniigotchi/models"
+publish_package "shared/models" "@genii/models"
 
 echo "=== Step 3: Publishing apps ==="
-publish_package "apps/cli" "@geniigotchi/cli"
-publish_package "apps/daemon" "@geniigotchi/daemon"
+publish_package "apps/cli" "@genii/cli"
+publish_package "apps/daemon" "@genii/daemon"
 
 echo "=== Step 4: Publishing root meta-package ==="
 # Create a temporary package.json with resolved versions
@@ -151,14 +151,14 @@ const cliPkg = require('./apps/cli/package.json');
 const daemonPkg = require('./apps/daemon/package.json');
 
 pkg.dependencies = {
-    '@geniigotchi/cli': '^' + cliPkg.version,
-    '@geniigotchi/daemon': '^' + daemonPkg.version
+    '@genii/cli': '^' + cliPkg.version,
+    '@genii/daemon': '^' + daemonPkg.version
 };
 
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 
-echo "Publishing geniigotchi (meta-package)..."
+echo "Publishing genii (meta-package)..."
 # shellcheck disable=SC2086
 npm publish $PUBLISH_FLAGS
 

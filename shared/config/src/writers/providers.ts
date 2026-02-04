@@ -22,7 +22,7 @@ export interface ProviderConfigWrite {
  * @param providers - Provider configs keyed by name
  *
  * @example
- * await saveProvidersConfig('/home/user/.config/geniigotchi', {
+ * await saveProvidersConfig('/home/user/.config/genii', {
  *   zai: {
  *     type: 'anthropic',
  *     baseUrl: 'https://api.zai.com',

@@ -119,7 +119,7 @@ export function Channels(): React.ReactElement {
 			{channels.length === 0 ? (
 				<Box flexDirection="column">
 					<Text color="gray">No channels configured.</Text>
-					<Text color="gray">Configure channels in your geniigotchi config file.</Text>
+					<Text color="gray">Configure channels in your genii config file.</Text>
 				</Box>
 			) : (
 				<ChannelList

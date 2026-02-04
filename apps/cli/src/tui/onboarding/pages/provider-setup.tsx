@@ -3,7 +3,7 @@
  * @module tui/onboarding/pages/provider-setup
  */
 
-import type { AuthMethod, ProviderDefinition } from '@geniigotchi/config/providers/definitions';
+import type { AuthMethod, ProviderDefinition } from '@genii/config/providers/definitions';
 import { Box, Text } from 'ink';
 import type React from 'react';
 import { useState } from 'react';

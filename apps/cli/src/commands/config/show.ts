@@ -106,11 +106,11 @@ export function showCommand(config: Command): void {
 				// If daemon is not running, try to load config directly from files
 				if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
 					try {
-						const basePath = join(homedir(), '.config', 'geniigotchi');
+						const basePath = join(homedir(), '.config', 'genii');
 						const section = options.section as ConfigSection | undefined;
 
 						// Dynamically import the config module
-						const { loadConfig } = await import('@geniigotchi/config/config');
+						const { loadConfig } = await import('@genii/config/config');
 						const loadedConfig = await loadConfig({ basePath });
 
 						let configData: unknown;

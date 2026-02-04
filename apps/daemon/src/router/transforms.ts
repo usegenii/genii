@@ -7,9 +7,9 @@
  * - Platform-specific content normalization
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { InboundEvent, OutboundIntent } from '@geniigotchi/comms/events/types';
-import type { AgentEvent } from '@geniigotchi/orchestrator/events/types';
+import type { Destination } from '@genii/comms/destination/types';
+import type { InboundEvent, OutboundIntent } from '@genii/comms/events/types';
+import type { AgentEvent } from '@genii/orchestrator/events/types';
 
 /**
  * Result of transforming an inbound event to agent input.

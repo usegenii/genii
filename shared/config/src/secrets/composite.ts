@@ -30,7 +30,7 @@ async function isNativeSecretStoreAvailable(serviceName: string): Promise<boolea
  * - Linux: Uses libsecret via D-Bus Secret Service if available, otherwise falls back to file
  *
  * @param basePath - Base directory path for file-based fallback storage (used only if native store unavailable)
- * @param serviceName - Service name for native store namespace (e.g., 'geniigotchi')
+ * @param serviceName - Service name for native store namespace (e.g., 'genii')
  * @returns A SecretStore instance appropriate for the platform
  */
 export async function createSecretStore(basePath: string, serviceName: string): Promise<SecretStore> {

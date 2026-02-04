@@ -2,8 +2,8 @@
  * Core types for the slash command system.
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
+import type { Destination } from '@genii/comms/destination/types';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 

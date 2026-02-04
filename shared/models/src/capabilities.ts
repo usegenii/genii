@@ -2,7 +2,7 @@
  * Provider capabilities and thinking level resolution.
  */
 
-import type { ThinkingLevel } from '@geniigotchi/config/types/model';
+import type { ThinkingLevel } from '@genii/config/types/model';
 import type { ProviderType } from './types';
 
 /**

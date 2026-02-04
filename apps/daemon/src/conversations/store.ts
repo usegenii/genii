@@ -9,7 +9,7 @@
 
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
+import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import type { Logger } from '../logging/logger';
 import type { ConversationBinding, SerializedConversationBinding } from './types';
 

@@ -1,5 +1,5 @@
 {
-	"name": "@geniigotchi/comms",
+	"name": "@genii/comms",
 	"version": "1.0.0",
 	"description": "Communication layer for interfacing with third-party messaging platforms",
 	"type": "module",

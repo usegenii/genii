@@ -8,8 +8,8 @@
  * - Provides health status information
  */
 
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { CommandRegistryInterface } from './commands/registry';
 import type { ConversationManager } from './conversations/manager';
 import type { Logger, LogLevel } from './logging/logger';

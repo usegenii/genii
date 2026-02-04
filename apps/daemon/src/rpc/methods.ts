@@ -7,15 +7,15 @@
  * - Return types
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { ChannelId, ChannelStatus } from '@geniigotchi/comms/types/core';
+import type { Destination } from '@genii/comms/destination/types';
+import type { ChannelId, ChannelStatus } from '@genii/comms/types/core';
 import type {
 	AgentFilter,
 	AgentInput,
 	AgentSessionId,
 	AgentSnapshot,
 	AgentStatus,
-} from '@geniigotchi/orchestrator/types/core';
+} from '@genii/orchestrator/types/core';
 import type { ConversationBinding, ConversationFilter } from '../conversations/types';
 
 // =============================================================================

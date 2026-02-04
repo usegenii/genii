@@ -1,4 +1,4 @@
-# @geniigotchi/guidance
+# @genii/guidance
 
 Template guidance documents and documentation for the orchestrator system.
 
@@ -72,7 +72,7 @@ The `templates/` directory contains starter templates for creating your own guid
 3. Configure the orchestrator to use your guidance path
 
 ```typescript
-import { createCoordinator, createPiAdapter } from "@geniigotchi/orchestrator";
+import { createCoordinator, createPiAdapter } from "@genii/orchestrator";
 
 const coordinator = createCoordinator({
   adapter: createPiAdapter({ provider: "anthropic", model: "claude-3-5-sonnet-20241022" }),

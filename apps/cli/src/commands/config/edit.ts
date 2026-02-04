@@ -101,7 +101,7 @@ export function editCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'geniigotchi');
+			const basePath = join(homedir(), '.config', 'genii');
 
 			// Validate section if provided
 			if (section && !isValidSection(section)) {

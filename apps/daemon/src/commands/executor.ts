@@ -5,7 +5,7 @@
  * with the appropriate context.
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
+import type { Destination } from '@genii/comms/destination/types';
 import type { Logger } from '../logging/logger';
 import type { CommandRegistryInterface } from './registry';
 import type { CommandResult, CommandServices } from './types';

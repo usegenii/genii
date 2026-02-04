@@ -9,7 +9,7 @@
 
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { templates } from '@geniigotchi/guidance/templates';
+import { templates } from '@genii/guidance/templates';
 import type { Logger } from './logging/logger';
 import type { OnboardResult, OnboardStatus } from './rpc/methods';
 
@@ -82,7 +82,7 @@ export interface OnboardExecuteOptions {
  * Execute the onboarding operation.
  *
  * Writes template files to the guidance directory, optionally creating backups.
- * Templates are inlined at build time from the @geniigotchi/guidance package.
+ * Templates are inlined at build time from the @genii/guidance package.
  */
 export async function executeOnboard(config: OnboardConfig, options: OnboardExecuteOptions): Promise<OnboardResult> {
 	const { guidancePath, logger } = config;

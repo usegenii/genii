@@ -2,14 +2,14 @@
  * Telegram channel factory for creating Telegram channels from configuration.
  */
 
-import { TelegramChannel } from '@geniigotchi/comms/adapters/telegram/channel';
-import type { Channel } from '@geniigotchi/comms/channel/types';
-import { UserAllowlistFilter } from '@geniigotchi/comms/filters/user';
-import type { Logger } from '@geniigotchi/comms/logging/types';
-import type { ChannelId } from '@geniigotchi/comms/types/core';
-import type { SecretStore } from '@geniigotchi/config/secrets/types';
-import type { ChannelConfig, TelegramChannelConfig } from '@geniigotchi/config/types/channel';
-import { getSecretName } from '@geniigotchi/config/types/secret';
+import { TelegramChannel } from '@genii/comms/adapters/telegram/channel';
+import type { Channel } from '@genii/comms/channel/types';
+import { UserAllowlistFilter } from '@genii/comms/filters/user';
+import type { Logger } from '@genii/comms/logging/types';
+import type { ChannelId } from '@genii/comms/types/core';
+import type { SecretStore } from '@genii/config/secrets/types';
+import type { ChannelConfig, TelegramChannelConfig } from '@genii/config/types/channel';
+import { getSecretName } from '@genii/config/types/secret';
 import type { ChannelFactory } from './types';
 
 /**

@@ -4,7 +4,7 @@
  * These types are shared across job implementations.
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
+import type { Destination } from '@genii/comms/destination/types';
 
 /**
  * Metadata attached to pulse agent sessions.

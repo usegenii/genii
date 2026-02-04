@@ -8,7 +8,7 @@ import {
 	BUILTIN_PROVIDERS,
 	CUSTOM_PROVIDER_DEFINITION,
 	type ProviderDefinition,
-} from '@geniigotchi/config/providers/definitions';
+} from '@genii/config/providers/definitions';
 import { Box, Text } from 'ink';
 import type React from 'react';
 import { useState } from 'react';

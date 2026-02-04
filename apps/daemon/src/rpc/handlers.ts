@@ -7,11 +7,11 @@
  * - Integration with daemon subsystems
  */
 
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { Config } from '@geniigotchi/config/config';
-import type { ModelFactory } from '@geniigotchi/models/factory';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
-import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { Config } from '@genii/config/config';
+import type { ModelFactory } from '@genii/models/factory';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { resolveDefaultModel } from '../models/resolve';

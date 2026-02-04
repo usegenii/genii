@@ -2,9 +2,9 @@
  * Types for conversation management and bindings.
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { ChannelId } from '@geniigotchi/comms/types/core';
-import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
+import type { Destination } from '@genii/comms/destination/types';
+import type { ChannelId } from '@genii/comms/types/core';
+import type { AgentSessionId } from '@genii/orchestrator/types/core';
 
 /**
  * Binding between a destination and an agent session.

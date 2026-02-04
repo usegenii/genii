@@ -10,11 +10,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // Note: Since the onboard command integrates with the daemon RPC,
 // we'll test the individual components that make up the non-interactive mode
 
-import { BUILTIN_PROVIDERS, getProvider } from '@geniigotchi/config/providers/definitions';
-import { createSecretStore } from '@geniigotchi/config/secrets/composite';
-import { saveModelsConfig } from '@geniigotchi/config/writers/models';
-import { savePreferencesConfig } from '@geniigotchi/config/writers/preferences';
-import { saveProvidersConfig } from '@geniigotchi/config/writers/providers';
+import { BUILTIN_PROVIDERS, getProvider } from '@genii/config/providers/definitions';
+import { createSecretStore } from '@genii/config/secrets/composite';
+import { saveModelsConfig } from '@genii/config/writers/models';
+import { savePreferencesConfig } from '@genii/config/writers/preferences';
+import { saveProvidersConfig } from '@genii/config/writers/providers';
 
 describe('Onboard Command Integration', () => {
 	let testDir: string;
@@ -46,7 +46,7 @@ describe('Onboard Command Integration', () => {
 			}
 
 			// Store API key in secret store
-			const secretStore = await createSecretStore(testDir, 'geniigotchi');
+			const secretStore = await createSecretStore(testDir, 'genii');
 			const secretName = `${providerId}-api-key`;
 			const secretResult = await secretStore.set(secretName, apiKey);
 			expect(secretResult.success).toBe(true);
@@ -94,7 +94,7 @@ describe('Onboard Command Integration', () => {
 		});
 
 		it('should retrieve stored API key from secret store', async () => {
-			const secretStore = await createSecretStore(testDir, 'geniigotchi');
+			const secretStore = await createSecretStore(testDir, 'genii');
 			const apiKey = 'sk-test-secret-key';
 
 			// Store

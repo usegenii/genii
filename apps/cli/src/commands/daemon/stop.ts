@@ -38,12 +38,12 @@ async function waitForDaemonStop(timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Stop the Geniigotchi daemon.
+ * Stop the Genii daemon.
  */
 export function stopCommand(daemon: Command): void {
 	daemon
 		.command('stop')
-		.description('Stop the Geniigotchi daemon')
+		.description('Stop the Genii daemon')
 		.option('-f, --force', 'Force stop without graceful shutdown')
 		.option('--timeout <ms>', 'Timeout for graceful shutdown in milliseconds', '30000')
 		.action(async (options: StopOptions, cmd: Command) => {

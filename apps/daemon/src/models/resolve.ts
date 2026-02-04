@@ -4,7 +4,7 @@
  * Provides functions to resolve default models from configuration.
  */
 
-import type { Config } from '@geniigotchi/config/config';
+import type { Config } from '@genii/config/config';
 
 /**
  * Resolve the default model from configuration.

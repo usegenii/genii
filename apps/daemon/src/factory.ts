@@ -9,28 +9,28 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { Config } from '@geniigotchi/config/config';
-import { DEFAULT_PULSE_SCHEDULE } from '@geniigotchi/config/types/preferences';
-import type { ModelFactory } from '@geniigotchi/models/factory';
-import { DateTimeContextInjector } from '@geniigotchi/orchestrator/context-injectors/datetime/injector';
-import { IdentityContextInjector } from '@geniigotchi/orchestrator/context-injectors/identity/injector';
-import { InstructionsContextInjector } from '@geniigotchi/orchestrator/context-injectors/instructions/injector';
-import { MemoriesPathContextInjector } from '@geniigotchi/orchestrator/context-injectors/memories-path/injector';
-import { PulseContextInjector } from '@geniigotchi/orchestrator/context-injectors/pulse/injector';
-import { ContextInjectorRegistry } from '@geniigotchi/orchestrator/context-injectors/registry';
-import { SkillsContextInjector } from '@geniigotchi/orchestrator/context-injectors/skills/injector';
-import { SoulContextInjector } from '@geniigotchi/orchestrator/context-injectors/soul/injector';
-import { TasksContextInjector } from '@geniigotchi/orchestrator/context-injectors/tasks/injector';
-import { createCoordinator } from '@geniigotchi/orchestrator/coordinator/impl';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
-import { createFileSnapshotStore } from '@geniigotchi/orchestrator/snapshot/store';
-import type { SnapshotStore } from '@geniigotchi/orchestrator/snapshot/types';
-import { createDateTimeTool } from '@geniigotchi/orchestrator/tools/datetime/tool';
-import { createToolRegistry } from '@geniigotchi/orchestrator/tools/registry';
-import { DEFAULT_MAX_OUTPUT_LENGTH, DEFAULT_TIMEOUT_MS } from '@geniigotchi/orchestrator/tools/shell/constants';
-import { createShellTool } from '@geniigotchi/orchestrator/tools/shell/tool';
-import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { Config } from '@genii/config/config';
+import { DEFAULT_PULSE_SCHEDULE } from '@genii/config/types/preferences';
+import type { ModelFactory } from '@genii/models/factory';
+import { DateTimeContextInjector } from '@genii/orchestrator/context-injectors/datetime/injector';
+import { IdentityContextInjector } from '@genii/orchestrator/context-injectors/identity/injector';
+import { InstructionsContextInjector } from '@genii/orchestrator/context-injectors/instructions/injector';
+import { MemoriesPathContextInjector } from '@genii/orchestrator/context-injectors/memories-path/injector';
+import { PulseContextInjector } from '@genii/orchestrator/context-injectors/pulse/injector';
+import { ContextInjectorRegistry } from '@genii/orchestrator/context-injectors/registry';
+import { SkillsContextInjector } from '@genii/orchestrator/context-injectors/skills/injector';
+import { SoulContextInjector } from '@genii/orchestrator/context-injectors/soul/injector';
+import { TasksContextInjector } from '@genii/orchestrator/context-injectors/tasks/injector';
+import { createCoordinator } from '@genii/orchestrator/coordinator/impl';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import { createFileSnapshotStore } from '@genii/orchestrator/snapshot/store';
+import type { SnapshotStore } from '@genii/orchestrator/snapshot/types';
+import { createDateTimeTool } from '@genii/orchestrator/tools/datetime/tool';
+import { createToolRegistry } from '@genii/orchestrator/tools/registry';
+import { DEFAULT_MAX_OUTPUT_LENGTH, DEFAULT_TIMEOUT_MS } from '@genii/orchestrator/tools/shell/constants';
+import { createShellTool } from '@genii/orchestrator/tools/shell/tool';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import { setupCommandSystem } from './commands/setup';
 import { ConversationManager } from './conversations/manager';
 import { createFileConversationStore } from './conversations/store';
@@ -77,9 +77,9 @@ export interface CreateDaemonOptions {
  */
 function getDefaultSocketPath(): string {
 	if (process.platform === 'win32') {
-		return '\\\\.\\pipe\\geniigotchi-daemon';
+		return '\\\\.\\pipe\\genii-daemon';
 	}
-	return '/tmp/geniigotchi-daemon.sock';
+	return '/tmp/genii-daemon.sock';
 }
 
 /**
@@ -88,13 +88,13 @@ function getDefaultSocketPath(): string {
 function getDefaultDataPath(): string {
 	const home = homedir();
 	if (process.platform === 'darwin') {
-		return join(home, 'Library', 'Application Support', 'geniigotchi');
+		return join(home, 'Library', 'Application Support', 'genii');
 	}
 	if (process.platform === 'win32') {
-		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'geniigotchi');
+		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'genii');
 	}
 	// Linux/Unix - use XDG_DATA_HOME or fallback
-	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'geniigotchi');
+	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'genii');
 }
 
 /**
@@ -113,7 +113,11 @@ function createPlaceholderChannelRegistry(): ChannelRegistry {
 				// Empty async iterator
 			},
 		}),
-		process: async () => ({ intentType: 'agent_thinking', success: false, timestamp: Date.now() }),
+		process: async () => ({
+			intentType: 'agent_thinking',
+			success: false,
+			timestamp: Date.now(),
+		}),
 	};
 }
 

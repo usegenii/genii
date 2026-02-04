@@ -8,8 +8,8 @@
  * - Coordinating with the persistence store
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
+import type { Destination } from '@genii/comms/destination/types';
+import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import type { Logger } from '../logging/logger';
 import type { ConversationStore } from './store';
 import type { ConversationBinding, ConversationFilter } from './types';

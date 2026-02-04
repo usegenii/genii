@@ -2,9 +2,9 @@
  * Types for the models package.
  */
 
-import type { Config } from '@geniigotchi/config/config';
-import type { SecretStore } from '@geniigotchi/config/secrets/types';
-import type { ThinkingLevel } from '@geniigotchi/config/types/model';
+import type { Config } from '@genii/config/config';
+import type { SecretStore } from '@genii/config/secrets/types';
+import type { ThinkingLevel } from '@genii/config/types/model';
 
 /**
  * Supported provider types.

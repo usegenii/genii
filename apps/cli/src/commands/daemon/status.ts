@@ -48,7 +48,7 @@ function displayStatus(status: DaemonStatus, formatter: ReturnType<typeof getFor
 }
 
 /**
- * Get the status of the Geniigotchi daemon.
+ * Get the status of the Genii daemon.
  */
 export function statusCommand(daemon: Command): void {
 	daemon

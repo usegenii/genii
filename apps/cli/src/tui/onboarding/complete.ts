@@ -5,14 +5,14 @@
  */
 
 import { join } from 'node:path';
-import { readTomlFileOptional } from '@geniigotchi/config/loaders/toml';
-import { CUSTOM_PROVIDER_DEFINITION, getProvider } from '@geniigotchi/config/providers/definitions';
-import { createSecretStore } from '@geniigotchi/config/secrets/composite';
-import type { ModelConfigWrite } from '@geniigotchi/config/writers/models';
-import { saveModelsConfig } from '@geniigotchi/config/writers/models';
-import { savePreferencesConfig } from '@geniigotchi/config/writers/preferences';
-import { saveProvidersConfig } from '@geniigotchi/config/writers/providers';
-import { writeTomlFile } from '@geniigotchi/config/writers/toml';
+import { readTomlFileOptional } from '@genii/config/loaders/toml';
+import { CUSTOM_PROVIDER_DEFINITION, getProvider } from '@genii/config/providers/definitions';
+import { createSecretStore } from '@genii/config/secrets/composite';
+import type { ModelConfigWrite } from '@genii/config/writers/models';
+import { saveModelsConfig } from '@genii/config/writers/models';
+import { savePreferencesConfig } from '@genii/config/writers/preferences';
+import { saveProvidersConfig } from '@genii/config/writers/providers';
+import { writeTomlFile } from '@genii/config/writers/toml';
 import { createDaemonClient } from '../../client';
 import type { OnboardingState } from './types';
 
@@ -82,7 +82,7 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	}
 
 	// 1. Store API key in OS keychain / secret store
-	const secretStore = await createSecretStore(configPath, 'geniigotchi');
+	const secretStore = await createSecretStore(configPath, 'genii');
 	const secretName = `${providerId}-api-key`;
 	const secretResult = await secretStore.set(secretName, apiKey);
 

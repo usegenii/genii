@@ -7,9 +7,9 @@
  * - null/undefined for silent mode
  */
 
-import type { Destination } from '@geniigotchi/comms/destination/types';
-import type { ChannelId } from '@geniigotchi/comms/types/core';
-import type { SchedulerConfig, SchedulerDestination } from '@geniigotchi/config/types/preferences';
+import type { Destination } from '@genii/comms/destination/types';
+import type { ChannelId } from '@genii/comms/types/core';
+import type { SchedulerConfig, SchedulerDestination } from '@genii/config/types/preferences';
 import type { Logger } from '../logging/logger';
 import type { LastActiveTracker } from './last-active-tracker';
 

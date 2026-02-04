@@ -2,12 +2,12 @@
  * ModelFactory: bridges config + secrets to adapter creation.
  */
 
-import type { Config } from '@geniigotchi/config/config';
-import type { SecretStore } from '@geniigotchi/config/secrets/types';
-import { getSecretName, isSecretReference } from '@geniigotchi/config/types/secret';
-import { createPiAdapter } from '@geniigotchi/orchestrator/adapters/pi/adapter';
-import type { PiAdapterOptions } from '@geniigotchi/orchestrator/adapters/pi/types';
-import type { AgentAdapter } from '@geniigotchi/orchestrator/adapters/types';
+import type { Config } from '@genii/config/config';
+import type { SecretStore } from '@genii/config/secrets/types';
+import { getSecretName, isSecretReference } from '@genii/config/types/secret';
+import { createPiAdapter } from '@genii/orchestrator/adapters/pi/adapter';
+import type { PiAdapterOptions } from '@genii/orchestrator/adapters/pi/types';
+import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import { isValidProviderType, resolveThinkingLevel } from './capabilities';
 import type { ModelFactoryOptions, ProviderType, ResolvedModelConfig, SessionModelOptions } from './types';
 import { parseModelIdentifier } from './types';

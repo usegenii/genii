@@ -1,5 +1,5 @@
 /**
- * Binary entry point for the geniigotchi daemon.
+ * Binary entry point for the genii daemon.
  * @module bin/daemon
  *
  * Note: The shebang (#!/usr/bin/env node) is added by tsup during build.

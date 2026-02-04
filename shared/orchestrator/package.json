@@ -1,5 +1,5 @@
 {
-	"name": "@geniigotchi/orchestrator",
+	"name": "@genii/orchestrator",
 	"version": "1.0.0",
 	"description": "Core orchestrator system for managing autonomous AI agents",
 	"type": "module",

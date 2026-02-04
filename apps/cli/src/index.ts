@@ -16,7 +16,7 @@ import { tuiCommand } from './commands/tui';
 
 export const program = new Command();
 
-program.name('genii').description('CLI for managing the Geniigotchi daemon and agents').version('0.0.1');
+program.name('genii').description('CLI for managing the Genii daemon and agents').version('0.0.1');
 
 // Global options
 program

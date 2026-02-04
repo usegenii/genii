@@ -8,12 +8,12 @@
  */
 
 import * as readline from 'node:readline';
-import { getProvider } from '@geniigotchi/config/providers/definitions';
-import { createSecretStore } from '@geniigotchi/config/secrets/composite';
-import type { ModelConfigWrite } from '@geniigotchi/config/writers/models';
-import { saveModelsConfig } from '@geniigotchi/config/writers/models';
-import { savePreferencesConfig } from '@geniigotchi/config/writers/preferences';
-import { saveProvidersConfig } from '@geniigotchi/config/writers/providers';
+import { getProvider } from '@genii/config/providers/definitions';
+import { createSecretStore } from '@genii/config/secrets/composite';
+import type { ModelConfigWrite } from '@genii/config/writers/models';
+import { saveModelsConfig } from '@genii/config/writers/models';
+import { savePreferencesConfig } from '@genii/config/writers/preferences';
+import { saveProvidersConfig } from '@genii/config/writers/providers';
 import type { Command } from 'commander';
 import { render } from 'ink';
 import React from 'react';
@@ -129,7 +129,7 @@ export function registerOnboardCommand(program: Command): void {
 					}
 
 					// Store API key in secret store
-					const secretStore = await createSecretStore(configPath, 'geniigotchi');
+					const secretStore = await createSecretStore(configPath, 'genii');
 					const secretName = `${options.provider}-api-key`;
 					const secretResult = await secretStore.set(secretName, options.apiKey);
 					if (!secretResult.success) {
@@ -178,8 +178,8 @@ export function registerOnboardCommand(program: Command): void {
 
 						// Write scheduler config with pulse enabled
 						// Since the preferences writer supports merging, we write directly to the file
-						const { writeTomlFile } = await import('@geniigotchi/config/writers/toml');
-						const { readTomlFileOptional } = await import('@geniigotchi/config/loaders/toml');
+						const { writeTomlFile } = await import('@genii/config/writers/toml');
+						const { readTomlFileOptional } = await import('@genii/config/loaders/toml');
 						const { join } = await import('node:path');
 
 						const prefsPath = join(configPath, 'preferences.toml');

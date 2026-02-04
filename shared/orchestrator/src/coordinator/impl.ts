@@ -262,7 +262,7 @@ export class CoordinatorImpl implements Coordinator {
 					handle
 						.checkpoint()
 						.then((checkpoint) => {
-							// Inject Geniigotchi provider/model from adapter into checkpoint
+							// Inject Genii provider/model from adapter into checkpoint
 							const enrichedCheckpoint: AgentCheckpoint = {
 								...checkpoint,
 								adapterConfig: {
@@ -438,7 +438,7 @@ export class CoordinatorImpl implements Coordinator {
 					handle
 						.checkpoint()
 						.then((checkpoint) => {
-							// Inject Geniigotchi provider/model from adapter into checkpoint
+							// Inject Genii provider/model from adapter into checkpoint
 							const enrichedCheckpoint: AgentCheckpoint = {
 								...checkpoint,
 								adapterConfig: {

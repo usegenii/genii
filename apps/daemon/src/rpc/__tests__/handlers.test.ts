@@ -2,13 +2,13 @@
  * Tests for RPC handlers.
  */
 
-import type { ChannelRegistry } from '@geniigotchi/comms/registry/types';
-import type { ModelFactory } from '@geniigotchi/models/factory';
-import type { Coordinator } from '@geniigotchi/orchestrator/coordinator/types';
-import type { AgentHandle } from '@geniigotchi/orchestrator/handle/types';
-import type { AgentCheckpoint } from '@geniigotchi/orchestrator/snapshot/types';
-import type { ToolRegistryInterface } from '@geniigotchi/orchestrator/tools/types';
-import type { AgentSessionId } from '@geniigotchi/orchestrator/types/core';
+import type { ChannelRegistry } from '@genii/comms/registry/types';
+import type { ModelFactory } from '@genii/models/factory';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { AgentHandle } from '@genii/orchestrator/handle/types';
+import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
 import type { Logger } from '../../logging/logger';
