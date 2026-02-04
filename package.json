@@ -26,6 +26,10 @@
 	],
 	"author": "",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/usegenii/genii"
+	},
 	"packageManager": "pnpm@10.24.0",
 	"dependencies": {
 		"@genii/cli": "workspace:*",
