@@ -63,7 +63,7 @@ describe('Onboard Command Integration', () => {
 			// Verify providers.toml
 			const providersContent = await readFile(join(testDir, 'providers.toml'), 'utf-8');
 			expect(providersContent).toContain('[zai]');
-			expect(providersContent).toContain('type = "anthropic"');
+			expect(providersContent).toContain('type = "openai"');
 			expect(providersContent).toContain('credential = "secret:zai-api-key"');
 
 			// Write models config
@@ -113,7 +113,7 @@ describe('Onboard Command Integration', () => {
 
 			const zaiProvider = getProvider('zai');
 			expect(zaiProvider).toBeDefined();
-			expect(zaiProvider?.apiType).toBe('anthropic');
+			expect(zaiProvider?.apiType).toBe('openai');
 		});
 	});
 });
