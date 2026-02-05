@@ -4,8 +4,6 @@
  */
 
 import { spawn } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
 import { createDaemonClient, getSocketPath } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
@@ -47,23 +45,12 @@ async function waitForDaemon(timeoutMs: number = 5000): Promise<boolean> {
 	return false;
 }
 
-/**
- * Get the path to the daemon entry script.
- */
-function getDaemonEntryPath(): string {
-	// Get the path relative to CLI package
-	const currentDir = dirname(fileURLToPath(import.meta.url));
-	// Navigate from apps/cli/src/commands/daemon to apps/daemon/src
-	return resolve(currentDir, '..', '..', '..', '..', 'daemon', 'src', 'index.ts');
-}
 
 interface StartOptions {
 	foreground?: boolean;
 	background?: boolean;
 	data?: string;
 	guidance?: string;
-	pidFile?: string;
-	logFile?: string;
 }
 
 /**
@@ -77,8 +64,6 @@ export function startCommand(daemon: Command): void {
 		.option('-b, --background', 'Run in background (default)')
 		.option('-d, --data <path>', 'Path to data directory (config, conversations, snapshots, guidance)')
 		.option('-g, --guidance <path>', 'Override guidance directory (defaults to {data}/guidance)')
-		.option('--pid-file <path>', 'Path to PID file')
-		.option('--log-file <path>', 'Path to log file')
 		.action(async (options: StartOptions, cmd: Command) => {
 			const globalOpts = cmd.optsWithGlobals();
 			const format = getOutputFormat(globalOpts);
@@ -103,24 +88,22 @@ export function startCommand(daemon: Command): void {
 			spinner.start();
 
 			try {
-				const daemonEntry = getDaemonEntryPath();
 				const socketPath = getSocketPath();
 
-				// Build environment for the daemon process
-				const env = {
-					...process.env,
-					GENII_SOCKET: socketPath,
-					...(options.data && { GENII_DATA: options.data }),
-					...(options.guidance && { GENII_GUIDANCE: options.guidance }),
-					...(options.pidFile && { GENII_PID_FILE: options.pidFile }),
-					...(options.logFile && { GENII_LOG_FILE: options.logFile }),
-				};
+				// Build command line arguments for the daemon
+				const daemonArgs: string[] = [];
+				daemonArgs.push('--socket', socketPath);
+				if (options.data) {
+					daemonArgs.push('--data', options.data);
+				}
+				if (options.guidance) {
+					daemonArgs.push('--guidance', options.guidance);
+				}
 
-				// Spawn the daemon process detached
-				const child = spawn(process.execPath, ['--import', 'tsx', daemonEntry], {
+				// Spawn the genii-daemon binary detached
+				const child = spawn('genii-daemon', daemonArgs, {
 					detached: true,
 					stdio: 'ignore',
-					env,
 				});
 
 				// Unref so parent can exit
