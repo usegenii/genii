@@ -13,8 +13,8 @@ export interface WizardNavProps {
 	currentPage: number;
 	/** Whether back navigation is available */
 	canGoBack: boolean;
-	/** Whether next navigation is available */
-	canGoNext: boolean;
+	/** Whether proceeding to next page is allowed */
+	canProceed: boolean;
 	/** Whether this is the final page */
 	isComplete: boolean;
 }
@@ -22,7 +22,7 @@ export interface WizardNavProps {
 /**
  * Navigation bar showing progress and page controls.
  */
-export function WizardNav({ currentPage, canGoBack, canGoNext, isComplete }: WizardNavProps): React.ReactElement {
+export function WizardNav({ currentPage, canGoBack, canProceed, isComplete }: WizardNavProps): React.ReactElement {
 	const theme = useTerminalTheme();
 	const currentPageInfo = PAGES[currentPage];
 	const totalPages = PAGES.length;
@@ -60,8 +60,8 @@ export function WizardNav({ currentPage, canGoBack, canGoNext, isComplete }: Wiz
 			<Box marginTop={1} justifyContent="space-between">
 				<Box>{canGoBack && <Text color={theme.muted}>← Esc to go back</Text>}</Box>
 				<Box>
-					{canGoNext && <Text color={theme.success}>Enter to continue →</Text>}
-					{isComplete && (
+					{canProceed && !isComplete && <Text color={theme.success}>Enter to continue →</Text>}
+					{canProceed && isComplete && (
 						<Text color={theme.success} bold>
 							Enter to complete setup →
 						</Text>

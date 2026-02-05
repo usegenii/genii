@@ -5,9 +5,11 @@
 
 import { Box, Text } from 'ink';
 import type React from 'react';
+import { useEffect } from 'react';
 import { ToggleField } from '../components/toggle-field';
-import { useWizard } from '../context';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
+import { useWizardKeyboard } from '../hooks/use-wizard-keyboard';
+import type { WizardPageProps } from '../types';
 
 const DISCLAIMER_TEXT = `Before proceeding, please read and accept the following:
 
@@ -25,9 +27,19 @@ const DISCLAIMER_TEXT = `Before proceeding, please read and accept the following
 /**
  * Disclaimer acceptance page.
  */
-export function DisclaimerPage(): React.ReactElement {
+export function DisclaimerPage({ state, onCommit, onNext, onValidityChange }: WizardPageProps): React.ReactElement {
 	const theme = useTerminalTheme();
-	const { state, dispatch } = useWizard();
+
+	// Update validity when disclaimer acceptance changes
+	useEffect(() => {
+		onValidityChange(state.disclaimerAccepted);
+	}, [state.disclaimerAccepted, onValidityChange]);
+
+	// Handle Enter to advance when accepted
+	useWizardKeyboard({
+		enabled: state.disclaimerAccepted,
+		onNext,
+	});
 
 	return (
 		<Box flexDirection="column" paddingX={2}>
@@ -45,7 +57,7 @@ export function DisclaimerPage(): React.ReactElement {
 				<ToggleField
 					label="I have read and accept the above terms"
 					value={state.disclaimerAccepted}
-					onChange={(accepted) => dispatch({ type: 'SET_DISCLAIMER_ACCEPTED', accepted })}
+					onChange={() => onCommit({ disclaimerAccepted: !state.disclaimerAccepted })}
 					isFocused={true}
 				/>
 			</Box>

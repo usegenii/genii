@@ -9,7 +9,6 @@ import { readTomlFileOptional } from '@genii/config/loaders/toml';
 import { CUSTOM_PROVIDER_DEFINITION, getProvider } from '@genii/config/providers/definitions';
 import { createSecretStore } from '@genii/config/secrets/composite';
 import type { ModelConfigWrite } from '@genii/config/writers/models';
-import { saveModelsConfig } from '@genii/config/writers/models';
 import { savePreferencesConfig } from '@genii/config/writers/preferences';
 import { saveProvidersConfig } from '@genii/config/writers/providers';
 import { writeTomlFile } from '@genii/config/writers/toml';
@@ -73,7 +72,10 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	const baseUrl = isCustomProvider ? state.provider.custom?.baseUrl : providerDef.defaultBaseUrl;
 	const apiType = isCustomProvider ? (state.provider.custom?.apiType ?? 'anthropic') : providerDef.apiType;
 
-	if (!apiKey) {
+	// Check if we should keep the existing API key
+	const keepExistingApiKey = state.provider.keepExistingApiKey ?? false;
+
+	if (!keepExistingApiKey && !apiKey) {
 		return { success: false, error: 'API key is required' };
 	}
 
@@ -81,13 +83,16 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		return { success: false, error: 'Base URL is required' };
 	}
 
-	// 1. Store API key in OS keychain / secret store
+	// 1. Store API key in OS keychain / secret store (skip if keeping existing)
 	const secretStore = await createSecretStore(configPath, 'genii');
 	const secretName = `${providerId}-api-key`;
-	const secretResult = await secretStore.set(secretName, apiKey);
 
-	if (!secretResult.success) {
-		return { success: false, error: `Failed to store API key: ${secretResult.error}` };
+	if (!keepExistingApiKey && apiKey) {
+		const secretResult = await secretStore.set(secretName, apiKey);
+
+		if (!secretResult.success) {
+			return { success: false, error: `Failed to store API key: ${secretResult.error}` };
+		}
 	}
 
 	// 2. Write providers.toml
@@ -99,21 +104,33 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		},
 	});
 
-	// 3. Write models.toml
-	const modelsConfig: Record<string, ModelConfigWrite> = {};
+	// 3. Write models.toml (and remove deselected models)
+	const modelsPath = join(configPath, 'models.toml');
+	const existingModels = await readTomlFileOptional<Record<string, ModelConfigWrite>>(modelsPath);
+
+	// Start with existing models, removing ones marked for removal
+	const modelsConfig: Record<string, ModelConfigWrite> = { ...existingModels };
+	for (const modelId of state.modelsToRemove ?? []) {
+		delete modelsConfig[modelId];
+	}
+
+	// Add/update selected models
 	for (const modelId of state.selectedModels) {
 		modelsConfig[modelId] = {
 			provider: providerId,
 			modelId,
 		};
 	}
-	await saveModelsConfig(configPath, modelsConfig);
 
-	// 4. Write preferences.toml
+	// Write the full config (not using merge since we've already handled it)
+	await writeTomlFile(modelsPath, modelsConfig);
+
+	// 4. Write preferences.toml (defaultModels only written if none exist)
 	await savePreferencesConfig(configPath, {
 		logLevel: state.preferences.logLevel,
 		shellTimeout: state.preferences.shellTimeout,
 		timezone: state.preferences.timezone,
+		defaultModels: state.selectedModels,
 	});
 
 	// 5. Write pulse/scheduler config if enabled
@@ -143,9 +160,9 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		const client = createDaemonClient();
 		await client.connect();
 
-		const backupMode = state.templates.overwriteMode === 'backup';
 		const result = await client.onboardExecute({
-			backup: backupMode,
+			backup: state.templates.overwriteMode === 'backup',
+			skip: state.templates.overwriteMode === 'skip',
 			dryRun: false,
 		});
 

@@ -74,6 +74,8 @@ export async function getOnboardStatus(config: OnboardConfig): Promise<OnboardSt
 export interface OnboardExecuteOptions {
 	/** Create .bak files for overwritten files */
 	backup: boolean;
+	/** Skip files that already exist (don't overwrite) */
+	skip: boolean;
 	/** Only report what would be done, don't actually copy */
 	dryRun: boolean;
 }
@@ -86,9 +88,9 @@ export interface OnboardExecuteOptions {
  */
 export async function executeOnboard(config: OnboardConfig, options: OnboardExecuteOptions): Promise<OnboardResult> {
 	const { guidancePath, logger } = config;
-	const { backup, dryRun } = options;
+	const { backup, skip, dryRun } = options;
 
-	logger.info({ guidancePath, backup, dryRun }, 'Executing onboard');
+	logger.info({ guidancePath, backup, skip, dryRun }, 'Executing onboard');
 
 	const copied: string[] = [];
 	const backedUp: string[] = [];
@@ -116,8 +118,17 @@ export async function executeOnboard(config: OnboardConfig, options: OnboardExec
 			continue;
 		}
 
-		// Check if destination exists and needs backup
+		// Check if destination exists
 		const destExists = await fileExists(destPath);
+
+		// Skip if file exists and skip mode is enabled
+		if (destExists && skip) {
+			logger.debug({ file }, 'Skipping existing file');
+			skipped.push(file);
+			continue;
+		}
+
+		// Backup existing file if backup mode is enabled
 		if (destExists && backup) {
 			logger.debug({ destPath, backupPath }, 'Creating backup');
 			await rename(destPath, backupPath);

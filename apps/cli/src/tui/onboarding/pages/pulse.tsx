@@ -5,13 +5,12 @@
 
 import { Box, Text } from 'ink';
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SelectField, type SelectOption } from '../components/select-field';
 import { ToggleField } from '../components/toggle-field';
-import { useWizard } from '../context';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
 import { useWizardKeyboard } from '../hooks/use-wizard-keyboard';
-import type { PulseState } from '../types';
+import type { PulseState, WizardPageProps } from '../types';
 
 const INTERVAL_OPTIONS: SelectOption[] = [
 	{ value: '15m', label: 'Every 15 minutes' },
@@ -49,15 +48,20 @@ type FocusedField = 'toggle' | 'interval';
 /**
  * Pulse configuration page.
  */
-export function PulsePage(): React.ReactElement {
+export function PulsePage({ state, onCommit, onNext, onBack, onValidityChange }: WizardPageProps): React.ReactElement {
 	const theme = useTerminalTheme();
-	const { state, dispatch } = useWizard();
 	const [focusedField, setFocusedField] = useState<FocusedField>('toggle');
 
-	// Handle escape to go back
+	// Always valid
+	useEffect(() => {
+		onValidityChange(true);
+	}, [onValidityChange]);
+
+	// Handle keyboard navigation
 	useWizardKeyboard({
 		enabled: true,
-		onBack: () => dispatch({ type: 'PREV_PAGE' }),
+		onNext,
+		onBack: () => onBack(),
 	});
 
 	// Handle down arrow on toggle to move to interval (only when pulse is enabled)
@@ -84,7 +88,7 @@ export function PulsePage(): React.ReactElement {
 					label="Enable Pulse"
 					value={state.pulse.enabled}
 					onChange={(enabled) => {
-						dispatch({ type: 'SET_PULSE', pulse: { enabled } });
+						onCommit({ pulse: { ...state.pulse, enabled } });
 						// Reset focus to toggle when disabling
 						if (!enabled) {
 							setFocusedField('toggle');
@@ -101,7 +105,7 @@ export function PulsePage(): React.ReactElement {
 							options={INTERVAL_OPTIONS}
 							value={state.pulse.interval}
 							onChange={(value) =>
-								dispatch({ type: 'SET_PULSE', pulse: { interval: value as PulseState['interval'] } })
+								onCommit({ pulse: { ...state.pulse, interval: value as PulseState['interval'] } })
 							}
 							isFocused={focusedField === 'interval'}
 							onBoundaryUp={() => setFocusedField('toggle')}

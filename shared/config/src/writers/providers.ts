@@ -4,6 +4,7 @@
  */
 
 import { join } from 'node:path';
+import { readTomlFileOptional } from '../loaders/toml.js';
 import { writeTomlFile } from './toml.js';
 
 /**
@@ -17,6 +18,7 @@ export interface ProviderConfigWrite {
 
 /**
  * Save providers configuration.
+ * Merges with existing providers if they exist.
  *
  * @param basePath - Base config directory path
  * @param providers - Provider configs keyed by name
@@ -35,5 +37,15 @@ export async function saveProvidersConfig(
 	providers: Record<string, ProviderConfigWrite>,
 ): Promise<void> {
 	const filePath = join(basePath, 'providers.toml');
-	await writeTomlFile(filePath, providers);
+
+	// Load existing providers if they exist
+	const existing = await readTomlFileOptional<Record<string, ProviderConfigWrite>>(filePath);
+
+	// Merge new providers with existing (new providers take precedence for same key)
+	const merged = {
+		...existing,
+		...providers,
+	};
+
+	await writeTomlFile(filePath, merged);
 }

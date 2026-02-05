@@ -13,28 +13,41 @@ import { Box, Text } from 'ink';
 import type React from 'react';
 import { useState } from 'react';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
+import type { ExistingConfig, ExistingProviderInfo } from '../types';
 import { type TreeNode, TreeSelect } from './tree-select';
 
 export interface ProviderSelectorProps {
 	/** Called when a provider is selected */
-	onSelect: (provider: ProviderDefinition, authMethod: AuthMethod) => void;
+	onSelect: (provider: ProviderDefinition, authMethod: AuthMethod, existingInfo?: ExistingProviderInfo) => void;
 	/** Whether the component is focused */
 	isFocused?: boolean;
 	/** Initial selected path */
 	initialPath?: string[];
+	/** Existing configuration for showing configured badges */
+	existingConfig?: ExistingConfig;
 }
 
 /**
  * Build tree nodes from provider definitions.
  * Includes auth method selection for providers with multiple auth methods.
  */
-function buildProviderTree(): TreeNode[] {
+function buildProviderTree(existingConfig?: ExistingConfig): TreeNode[] {
+	// Create a set of configured provider IDs for quick lookup
+	const configuredProviderIds = new Set(existingConfig?.providers.map((p) => p.providerId) ?? []);
+	const builtinIds = new Set(BUILTIN_PROVIDERS.map((p) => p.id));
+
+	// Find configured custom providers (non-builtin)
+	const configuredCustomProviders = existingConfig?.providers.filter((p) => !builtinIds.has(p.providerId)) ?? [];
+
 	const builtinNodes: TreeNode[] = BUILTIN_PROVIDERS.map((p: ProviderDefinition) => {
+		const isConfigured = configuredProviderIds.has(p.id);
+		const label = isConfigured ? `${p.name} [configured]` : p.name;
+
 		// If provider has multiple auth methods, add them as children
 		if (p.authMethods.length > 1) {
 			return {
 				id: p.id,
-				label: p.name,
+				label,
 				children: p.authMethods.map((auth) => ({
 					id: auth.type,
 					label: auth.name,
@@ -44,7 +57,7 @@ function buildProviderTree(): TreeNode[] {
 		// Single auth method - no children needed
 		return {
 			id: p.id,
-			label: p.name,
+			label,
 		};
 	});
 
@@ -64,7 +77,7 @@ function buildProviderTree(): TreeNode[] {
 					label: 'Custom Provider',
 				};
 
-	return [
+	const nodes: TreeNode[] = [
 		{
 			id: 'builtin',
 			label: 'Built-in Providers',
@@ -72,6 +85,22 @@ function buildProviderTree(): TreeNode[] {
 		},
 		customNode,
 	];
+
+	// Add configured custom providers section if any exist
+	if (configuredCustomProviders.length > 0) {
+		const configuredCustomNodes: TreeNode[] = configuredCustomProviders.map((p) => ({
+			id: p.providerId,
+			label: `${p.providerId} [configured]`,
+		}));
+
+		nodes.push({
+			id: 'configured-custom',
+			label: 'Configured Custom Providers',
+			children: configuredCustomNodes,
+		});
+	}
+
+	return nodes;
 }
 
 /**
@@ -82,16 +111,22 @@ export function ProviderSelector({
 	onSelect,
 	isFocused = true,
 	initialPath = ['builtin'],
+	existingConfig,
 }: ProviderSelectorProps): React.ReactElement {
 	const theme = useTerminalTheme();
 	const [selectedPath, setSelectedPath] = useState<string[]>(initialPath);
-	const providerTree = buildProviderTree();
+	const providerTree = buildProviderTree(existingConfig);
 
 	const handlePathHighlight = (path: string[]) => {
 		setSelectedPath(path);
 	};
 
 	const handlePathConfirm = (path: string[]) => {
+		// Helper to find existing provider info
+		const findExistingInfo = (providerId: string): ExistingProviderInfo | undefined => {
+			return existingConfig?.providers.find((p) => p.providerId === providerId);
+		};
+
 		// Handle custom provider selection (no parent category)
 		if (path.length === 1 && path[0] === 'custom') {
 			const authMethod = CUSTOM_PROVIDER_DEFINITION.authMethods[0];
@@ -110,6 +145,21 @@ export function ProviderSelector({
 			return;
 		}
 
+		// Handle configured custom provider selection (path: ['configured-custom', providerId])
+		if (path.length === 2 && path[0] === 'configured-custom') {
+			const providerId = path[1];
+			if (!providerId) return;
+			const existingInfo = findExistingInfo(providerId);
+			if (existingInfo) {
+				// Use custom provider definition for configured custom providers
+				const authMethod = CUSTOM_PROVIDER_DEFINITION.authMethods[0];
+				if (authMethod) {
+					onSelect(CUSTOM_PROVIDER_DEFINITION, authMethod, existingInfo);
+				}
+			}
+			return;
+		}
+
 		// Handle builtin provider selection (path: ['builtin', providerId])
 		if (path.length === 2 && path[0] === 'builtin') {
 			const provider = BUILTIN_PROVIDERS.find((p) => p.id === path[1]);
@@ -118,7 +168,8 @@ export function ProviderSelector({
 				if (provider.authMethods.length === 1) {
 					const authMethod = provider.authMethods[0];
 					if (authMethod) {
-						onSelect(provider, authMethod);
+						const existingInfo = findExistingInfo(provider.id);
+						onSelect(provider, authMethod, existingInfo);
 					}
 				}
 				// If multiple auth methods, tree will expand for user to select
@@ -132,7 +183,8 @@ export function ProviderSelector({
 			if (provider) {
 				const authMethod = provider.authMethods.find((a) => a.type === path[2]);
 				if (authMethod) {
-					onSelect(provider, authMethod);
+					const existingInfo = findExistingInfo(provider.id);
+					onSelect(provider, authMethod, existingInfo);
 				}
 			}
 		}

@@ -160,15 +160,12 @@ export function registerOnboardCommand(program: Command): void {
 					await saveModelsConfig(configPath, modelsConfig);
 					formatter.message(`Models configured: ${modelIds.join(', ')}`, 'success');
 
-					// Write preferences config
-					const preferencesConfig: {
-						logLevel?: 'debug' | 'info' | 'warn' | 'error';
-						shellTimeout?: number;
-					} = {
+					// Write preferences config (defaultModels only written if none exist)
+					await savePreferencesConfig(configPath, {
 						logLevel: (options.logLevel as 'debug' | 'info' | 'warn' | 'error') ?? 'info',
 						shellTimeout: 30,
-					};
-					await savePreferencesConfig(configPath, preferencesConfig);
+						defaultModels: modelIds,
+					});
 					formatter.message('Preferences configured', 'success');
 
 					// Handle Pulse config if enabled
@@ -215,6 +212,7 @@ export function registerOnboardCommand(program: Command): void {
 
 						const result = await client.onboardExecute({
 							backup: options.backup !== false,
+							skip: false,
 							dryRun: true,
 						});
 
@@ -248,6 +246,7 @@ export function registerOnboardCommand(program: Command): void {
 					// Execute onboard
 					const result = await client.onboardExecute({
 						backup: options.backup !== false,
+						skip: false,
 						dryRun: false,
 					});
 

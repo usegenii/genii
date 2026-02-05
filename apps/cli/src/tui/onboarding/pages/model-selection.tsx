@@ -6,49 +6,108 @@
 import { getModelsForProvider } from '@genii/config/providers/definitions';
 import { Box, Text } from 'ink';
 import type React from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MultiSelect, type MultiSelectOption } from '../components/multi-select';
 import { TextInputField } from '../components/text-input-field';
-import { useWizard } from '../context';
+import { getExistingModelsForProvider } from '../existing-config-loader';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
 import { useWizardKeyboard } from '../hooks/use-wizard-keyboard';
+import type { WizardPageProps } from '../types';
 
 /**
  * Model selection page.
  * Supports both built-in model selection and custom model entry.
  */
-export function ModelSelectionPage(): React.ReactElement {
+export function ModelSelectionPage({
+	state,
+	onCommit,
+	onNext,
+	onBack,
+	onValidityChange,
+}: WizardPageProps): React.ReactElement {
 	const theme = useTerminalTheme();
-	const { state, dispatch } = useWizard();
 	const [customModelInput, setCustomModelInput] = useState('');
 	const [focusMode, setFocusMode] = useState<'list' | 'input'>('list');
+	const [hasInitialized, setHasInitialized] = useState(false);
 
 	const isCustomProvider = state.provider.type === 'custom';
 
-	// Get available models for built-in providers
-	const providerId = state.provider.builtinId ?? 'zai';
+	// Get provider ID - use existingProviderId if editing, otherwise builtinId
+	const providerId = state.provider.existingProviderId ?? state.provider.builtinId ?? 'zai';
 	const availableModels = isCustomProvider ? [] : getModelsForProvider(providerId);
+
+	// Get existing models for the current provider
+	const existingModels = getExistingModelsForProvider(state.existingConfig, providerId);
+	const existingModelIds = new Set(existingModels.map((m) => m.modelId));
 
 	// Check which selected models are built-in vs custom
 	const builtinModelIds = new Set(availableModels.map((m) => m.id));
-	const customModels = state.selectedModels.filter((id) => !builtinModelIds.has(id));
+	const customModels = state.selectedModels.filter((id) => !builtinModelIds.has(id) && !existingModelIds.has(id));
 
-	const options: MultiSelectOption[] = availableModels.map((model) => ({
-		value: model.id,
-		label: model.name,
-		description: model.contextWindow ? `Context: ${(model.contextWindow / 1000).toFixed(0)}k tokens` : undefined,
-	}));
+	// Pre-select existing models on first render
+	useEffect(() => {
+		if (!hasInitialized && existingModels.length > 0) {
+			const existingIds = existingModels.map((m) => m.modelId);
+			// Merge with any already selected models
+			const merged = [...new Set([...state.selectedModels, ...existingIds])];
+			if (merged.length !== state.selectedModels.length) {
+				onCommit({ selectedModels: merged });
+			}
+			setHasInitialized(true);
+		}
+	}, [existingModels, hasInitialized, state.selectedModels, onCommit]);
+
+	// Track models that will be removed (existing models that are deselected)
+	const modelsToRemove = existingModels
+		.filter((m) => !state.selectedModels.includes(m.modelId))
+		.map((m) => m.modelId);
+
+	// Update modelsToRemove in state when it changes
+	useEffect(() => {
+		const currentRemove = state.modelsToRemove ?? [];
+		const removeSet = new Set(modelsToRemove);
+		const currentSet = new Set(currentRemove);
+
+		// Check if they're different
+		if (
+			modelsToRemove.length !== currentRemove.length ||
+			modelsToRemove.some((m) => !currentSet.has(m)) ||
+			currentRemove.some((m) => !removeSet.has(m))
+		) {
+			onCommit({ modelsToRemove: modelsToRemove });
+		}
+	}, [modelsToRemove, state.modelsToRemove, onCommit]);
+
+	// Update validity when selection changes
+	useEffect(() => {
+		onValidityChange(state.selectedModels.length > 0);
+	}, [state.selectedModels.length, onValidityChange]);
+
+	const options: MultiSelectOption[] = availableModels.map((model) => {
+		const isExisting = existingModelIds.has(model.id);
+		return {
+			value: model.id,
+			label: isExisting ? `${model.name} [existing]` : model.name,
+			description: model.contextWindow
+				? `Context: ${(model.contextWindow / 1000).toFixed(0)}k tokens`
+				: undefined,
+		};
+	});
 
 	const handleChange = (selected: string[]) => {
 		// Preserve custom models when changing built-in selection
-		const newSelection = [...selected, ...customModels];
-		dispatch({ type: 'SET_MODELS', models: newSelection });
+		// Also preserve existing models that are still selected
+		const existingStillSelected = existingModels
+			.filter((m) => selected.includes(m.modelId) || customModels.includes(m.modelId))
+			.map((m) => m.modelId);
+		const newSelection = [...new Set([...selected, ...customModels, ...existingStillSelected])];
+		onCommit({ selectedModels: newSelection });
 	};
 
 	const handleAddCustomModel = () => {
 		const trimmed = customModelInput.trim();
 		if (trimmed && !state.selectedModels.includes(trimmed)) {
-			dispatch({ type: 'SET_MODELS', models: [...state.selectedModels, trimmed] });
+			onCommit({ selectedModels: [...state.selectedModels, trimmed] });
 			setCustomModelInput('');
 		}
 	};
@@ -57,14 +116,19 @@ export function ModelSelectionPage(): React.ReactElement {
 	useWizardKeyboard({
 		enabled: true,
 		onBack: () => {
-			dispatch({ type: 'PREV_PAGE' });
+			onBack();
 		},
 	});
 
-	// Handle Enter to add custom model when input is focused
+	// Handle Enter to advance when in list mode or input mode with empty input
+	// (TextInputField's onSubmit handles adding custom models when input has text)
 	useWizardKeyboard({
-		enabled: focusMode === 'input' && customModelInput.trim().length > 0,
-		onNext: handleAddCustomModel,
+		enabled: focusMode === 'list' || (focusMode === 'input' && customModelInput.trim().length === 0),
+		onNext: () => {
+			if (state.selectedModels.length > 0) {
+				onNext();
+			}
+		},
 	});
 
 	// For custom providers without built-in models, always focus input
@@ -146,6 +210,27 @@ export function ModelSelectionPage(): React.ReactElement {
 			{state.selectedModels.length === 0 && (
 				<Box marginTop={1}>
 					<Text color={theme.error}>Please select at least one model to continue.</Text>
+				</Box>
+			)}
+
+			{/* Legend for existing models */}
+			{existingModels.length > 0 && (
+				<Box marginTop={1} flexDirection="column">
+					<Text color={theme.muted}>Legend: [existing] = already configured</Text>
+				</Box>
+			)}
+
+			{/* Warning for models that will be removed */}
+			{modelsToRemove.length > 0 && (
+				<Box marginTop={1} flexDirection="column">
+					<Text color={theme.warning ?? theme.error} bold>
+						The following models will be removed:
+					</Text>
+					{modelsToRemove.map((modelId) => (
+						<Box key={modelId} marginLeft={2}>
+							<Text color={theme.warning ?? theme.error}>- {modelId}</Text>
+						</Box>
+					))}
 				</Box>
 			)}
 		</Box>

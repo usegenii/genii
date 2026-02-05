@@ -3,10 +3,42 @@
  * @module tui/onboarding/types
  */
 
+import type { ModelConfig } from '@genii/config/types/model';
+import type { ProviderConfig } from '@genii/config/types/provider';
+
 /**
  * Page identifiers for the wizard.
  */
 export type PageId = 'disclaimer' | 'provider' | 'models' | 'preferences' | 'pulse' | 'templates';
+
+/**
+ * Information about an existing configured provider.
+ */
+export interface ExistingProviderInfo {
+	providerId: string;
+	config: ProviderConfig;
+	isBuiltin: boolean;
+	hasStoredApiKey: boolean;
+}
+
+/**
+ * Information about an existing configured model.
+ */
+export interface ExistingModelInfo {
+	modelId: string;
+	config: ModelConfig;
+	providerId: string;
+}
+
+/**
+ * Existing configuration loaded from config files.
+ */
+export interface ExistingConfig {
+	providers: ExistingProviderInfo[];
+	models: ExistingModelInfo[];
+	/** Whether preferences.toml exists (indicates user has completed onboarding before) */
+	hasExistingPreferences: boolean;
+}
 
 /**
  * Provider configuration in onboarding state.
@@ -20,6 +52,10 @@ export interface ProviderState {
 		baseUrl: string;
 		apiKey?: string;
 	};
+	/** Tracks if editing an existing provider */
+	existingProviderId?: string;
+	/** Whether to preserve the stored API key */
+	keepExistingApiKey?: boolean;
 }
 
 /**
@@ -57,32 +93,22 @@ export interface OnboardingState {
 	preferences: PreferencesState;
 	pulse: PulseState;
 	templates: TemplatesState;
+	/** Existing configuration loaded from config files */
+	existingConfig?: ExistingConfig;
+	/** Models that should be removed during completion */
+	modelsToRemove: string[];
 }
 
 /**
- * Actions for the wizard reducer.
+ * Props passed to each wizard page component.
  */
-export type WizardAction =
-	| { type: 'SET_PAGE'; page: number }
-	| { type: 'NEXT_PAGE' }
-	| { type: 'PREV_PAGE' }
-	| { type: 'SET_DISCLAIMER_ACCEPTED'; accepted: boolean }
-	| { type: 'SET_PROVIDER'; provider: ProviderState }
-	| { type: 'SET_MODELS'; models: string[] }
-	| { type: 'SET_PREFERENCES'; preferences: Partial<PreferencesState> }
-	| { type: 'SET_PULSE'; pulse: Partial<PulseState> }
-	| { type: 'SET_TEMPLATES'; templates: Partial<TemplatesState> }
-	| { type: 'LOAD_STATE'; state: OnboardingState };
-
-/**
- * Context value for the wizard.
- */
-export interface WizardContextValue {
+export interface WizardPageProps {
 	state: OnboardingState;
-	dispatch: React.Dispatch<WizardAction>;
-	canGoNext: boolean;
-	canGoBack: boolean;
-	isComplete: boolean;
+	existingConfig?: ExistingConfig;
+	onCommit: (updates: Partial<OnboardingState>) => void;
+	onNext: () => void;
+	onBack: () => void;
+	onValidityChange: (canProceed: boolean) => void;
 }
 
 /**
@@ -127,4 +153,5 @@ export const DEFAULT_STATE: OnboardingState = {
 	templates: {
 		overwriteMode: 'backup',
 	},
+	modelsToRemove: [],
 };

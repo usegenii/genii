@@ -4,6 +4,7 @@
  */
 
 import { join } from 'node:path';
+import { readTomlFileOptional } from '../loaders/toml.js';
 import { writeTomlFile } from './toml.js';
 
 /**
@@ -17,6 +18,7 @@ export interface ModelConfigWrite {
 
 /**
  * Save models configuration.
+ * Merges with existing models if they exist.
  *
  * @param basePath - Base config directory path
  * @param models - Model configs keyed by name
@@ -32,5 +34,15 @@ export interface ModelConfigWrite {
  */
 export async function saveModelsConfig(basePath: string, models: Record<string, ModelConfigWrite>): Promise<void> {
 	const filePath = join(basePath, 'models.toml');
-	await writeTomlFile(filePath, models);
+
+	// Load existing models if they exist
+	const existing = await readTomlFileOptional<Record<string, ModelConfigWrite>>(filePath);
+
+	// Merge new models with existing (new models take precedence for same key)
+	const merged = {
+		...existing,
+		...models,
+	};
+
+	await writeTomlFile(filePath, merged);
 }

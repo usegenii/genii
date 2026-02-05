@@ -5,11 +5,11 @@
 
 import { Box, Text } from 'ink';
 import type React from 'react';
+import { useEffect } from 'react';
 import { SelectField, type SelectOption } from '../components/select-field';
-import { useWizard } from '../context';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
 import { useWizardKeyboard } from '../hooks/use-wizard-keyboard';
-import type { TemplatesState } from '../types';
+import type { TemplatesState, WizardPageProps } from '../types';
 
 const TEMPLATE_FILES = ['INSTRUCTIONS.md', 'SOUL.md', 'PULSE.md'];
 
@@ -22,14 +22,25 @@ const OVERWRITE_OPTIONS: SelectOption[] = [
 /**
  * Templates installation page.
  */
-export function TemplatesPage(): React.ReactElement {
+export function TemplatesPage({
+	state,
+	onCommit,
+	onNext,
+	onBack,
+	onValidityChange,
+}: WizardPageProps): React.ReactElement {
 	const theme = useTerminalTheme();
-	const { state, dispatch } = useWizard();
 
-	// Handle escape to go back
+	// Always valid
+	useEffect(() => {
+		onValidityChange(true);
+	}, [onValidityChange]);
+
+	// Handle keyboard navigation
 	useWizardKeyboard({
 		enabled: true,
-		onBack: () => dispatch({ type: 'PREV_PAGE' }),
+		onNext,
+		onBack: () => onBack(),
 	});
 
 	return (
@@ -62,10 +73,7 @@ export function TemplatesPage(): React.ReactElement {
 				options={OVERWRITE_OPTIONS}
 				value={state.templates.overwriteMode}
 				onChange={(value) =>
-					dispatch({
-						type: 'SET_TEMPLATES',
-						templates: { overwriteMode: value as TemplatesState['overwriteMode'] },
-					})
+					onCommit({ templates: { overwriteMode: value as TemplatesState['overwriteMode'] } })
 				}
 				isFocused={true}
 			/>

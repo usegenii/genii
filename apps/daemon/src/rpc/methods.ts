@@ -354,6 +354,8 @@ export interface RpcMethods {
 	'onboard.execute': {
 		/** Create .bak files for overwritten files */
 		backup: boolean;
+		/** Skip files that already exist (don't overwrite) */
+		skip: boolean;
 		/** Only report what would be done, don't actually copy */
 		dryRun: boolean;
 	};

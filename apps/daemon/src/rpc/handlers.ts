@@ -722,6 +722,7 @@ async function handleOnboardExecute(
 		},
 		{
 			backup: params.backup,
+			skip: params.skip,
 			dryRun: params.dryRun,
 		},
 	);

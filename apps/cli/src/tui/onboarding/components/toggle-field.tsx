@@ -36,7 +36,7 @@ export function ToggleField({
 	useWizardKeyboard({
 		enabled: isFocused,
 		onToggle: () => onChange(!value),
-		onNext: () => onChange(!value),
+		// Don't handle Enter here - let the wizard's global handler advance the page
 	});
 
 	return (
