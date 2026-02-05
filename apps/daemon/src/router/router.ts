@@ -240,7 +240,12 @@ export class MessageRouter implements MessageRouterInterface {
 		// Get the conversation binding for this agent
 		const binding = this._conversationManager.getByAgent(agentId);
 		if (binding === undefined) {
-			this._logger.warn({ agentId }, 'No conversation binding found for agent');
+			// Pulse agents handle their own routing and don't have conversation bindings
+			const agentHandle = this._coordinator.get(agentId);
+			const isPulseAgent = agentHandle?.config.tags?.includes('pulse') ?? false;
+			if (!isPulseAgent) {
+				this._logger.warn({ agentId }, 'No conversation binding found for agent');
+			}
 			return;
 		}
 
