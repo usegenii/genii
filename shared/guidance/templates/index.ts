@@ -10,7 +10,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const TEMPLATES_DIR = join(__dirname, '..');
+const TEMPLATES_DIR = join(__dirname, '..', 'templates');
 
 /**
  * Recursively get all template files

@@ -3,15 +3,16 @@
 	"version": "1.0.0",
 	"description": "Template guidance documents for the orchestrator system",
 	"type": "module",
-	"main": "./templates/index.js",
-	"types": "./templates/index.d.ts",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"exports": {
 		"./templates": {
-			"import": "./templates/index.js",
-			"types": "./templates/index.d.ts"
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
 		}
 	},
 	"files": [
+		"dist",
 		"templates"
 	],
 	"scripts": {

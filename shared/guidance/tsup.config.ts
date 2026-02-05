@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
 	entry: ['templates/index.ts'],
-	outDir: 'templates',
+	outDir: 'dist',
 	format: ['esm'],
 	platform: 'node',
 	target: 'node20',
@@ -10,6 +10,6 @@ export default defineConfig({
 	splitting: false,
 	dts: true,
 	sourcemap: true,
-	clean: false, // Don't clean - we need to keep the .md files
+	clean: true,
 	treeshake: false,
 });
