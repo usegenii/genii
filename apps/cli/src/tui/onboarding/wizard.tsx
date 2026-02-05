@@ -10,6 +10,7 @@ import { completeOnboarding } from './complete';
 import { WizardNav } from './components/wizard-nav';
 import { loadExistingConfig } from './existing-config-loader';
 import { useTerminalTheme } from './hooks/use-terminal-theme';
+import { ChannelSetupPage } from './pages/channel-setup';
 import { DisclaimerPage } from './pages/disclaimer';
 import { ModelSelectionPage } from './pages/model-selection';
 import { PreferencesPage } from './pages/preferences';
@@ -110,6 +111,8 @@ function WizardContent({
 				return <ProviderSetupPage {...pageProps} />;
 			case 'models':
 				return <ModelSelectionPage {...pageProps} />;
+			case 'channels':
+				return <ChannelSetupPage {...pageProps} />;
 			case 'preferences':
 				return <PreferencesPage {...pageProps} />;
 			case 'pulse':

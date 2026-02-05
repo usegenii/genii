@@ -3,13 +3,14 @@
  * @module tui/onboarding/types
  */
 
+import type { ChannelConfig } from '@genii/config/types/channel';
 import type { ModelConfig } from '@genii/config/types/model';
 import type { ProviderConfig } from '@genii/config/types/provider';
 
 /**
  * Page identifiers for the wizard.
  */
-export type PageId = 'disclaimer' | 'provider' | 'models' | 'preferences' | 'pulse' | 'templates';
+export type PageId = 'disclaimer' | 'provider' | 'models' | 'channels' | 'preferences' | 'pulse' | 'templates';
 
 /**
  * Information about an existing configured provider.
@@ -31,11 +32,33 @@ export interface ExistingModelInfo {
 }
 
 /**
+ * State for a channel instance being configured in onboarding.
+ */
+export interface ChannelInstanceState {
+	name: string;
+	type: string;
+	credential?: string;
+	keepExistingCredential?: boolean;
+	fieldValues: Record<string, string>;
+	isExisting?: boolean;
+}
+
+/**
+ * Information about an existing configured channel.
+ */
+export interface ExistingChannelInfo {
+	name: string;
+	config: ChannelConfig;
+	hasStoredCredential: boolean;
+}
+
+/**
  * Existing configuration loaded from config files.
  */
 export interface ExistingConfig {
 	providers: ExistingProviderInfo[];
 	models: ExistingModelInfo[];
+	channels: ExistingChannelInfo[];
 	/** Whether preferences.toml exists (indicates user has completed onboarding before) */
 	hasExistingPreferences: boolean;
 }
@@ -93,6 +116,10 @@ export interface OnboardingState {
 	preferences: PreferencesState;
 	pulse: PulseState;
 	templates: TemplatesState;
+	/** Channel instances being configured */
+	channels: ChannelInstanceState[];
+	/** Channels that should be removed during completion */
+	channelsToRemove: string[];
 	/** Existing configuration loaded from config files */
 	existingConfig?: ExistingConfig;
 	/** Models that should be removed during completion */
@@ -127,6 +154,7 @@ export const PAGES: PageInfo[] = [
 	{ id: 'disclaimer', title: 'Disclaimer', description: 'Safety warning and acceptance' },
 	{ id: 'provider', title: 'Provider Setup', description: 'Configure your AI provider' },
 	{ id: 'models', title: 'Model Selection', description: 'Choose models to use' },
+	{ id: 'channels', title: 'Channels', description: 'Configure messaging channels' },
 	{ id: 'preferences', title: 'Preferences', description: 'General settings' },
 	{ id: 'pulse', title: 'Pulse', description: 'Proactive work scheduling' },
 	{ id: 'templates', title: 'Templates', description: 'Install guidance files' },
@@ -153,5 +181,7 @@ export const DEFAULT_STATE: OnboardingState = {
 	templates: {
 		overwriteMode: 'backup',
 	},
+	channels: [],
+	channelsToRemove: [],
 	modelsToRemove: [],
 };

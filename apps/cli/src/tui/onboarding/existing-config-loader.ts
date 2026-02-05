@@ -5,11 +5,12 @@
 
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
+import { loadChannelsConfig } from '@genii/config/loaders/channels';
 import { loadModelsConfig } from '@genii/config/loaders/models';
 import { loadProvidersConfig } from '@genii/config/loaders/providers';
 import { BUILTIN_PROVIDERS } from '@genii/config/providers/definitions';
 import { createSecretStore } from '@genii/config/secrets/composite';
-import type { ExistingConfig, ExistingModelInfo, ExistingProviderInfo } from './types';
+import type { ExistingChannelInfo, ExistingConfig, ExistingModelInfo, ExistingProviderInfo } from './types';
 
 /**
  * Extract secret name from a credential reference.
@@ -64,6 +65,25 @@ export async function loadExistingConfig(configPath: string): Promise<ExistingCo
 		providerId: config.provider,
 	}));
 
+	// Build channel info with credential status
+	const channelsResult = await loadChannelsConfig(configPath);
+	const channels: ExistingChannelInfo[] = [];
+	for (const [channelName, config] of Object.entries(channelsResult.channels)) {
+		const secretName = getSecretName(config.credential);
+		let hasStoredCredential = false;
+
+		if (secretName) {
+			const result = await secretStore.get(secretName);
+			hasStoredCredential = result.success;
+		}
+
+		channels.push({
+			name: channelName,
+			config,
+			hasStoredCredential,
+		});
+	}
+
 	// Check if preferences.toml exists (indicates user has completed onboarding before)
 	let hasExistingPreferences = false;
 	try {
@@ -73,7 +93,7 @@ export async function loadExistingConfig(configPath: string): Promise<ExistingCo
 		// File doesn't exist
 	}
 
-	return { providers, models, hasExistingPreferences };
+	return { providers, models, channels, hasExistingPreferences };
 }
 
 /**
