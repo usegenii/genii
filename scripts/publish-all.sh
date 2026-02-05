@@ -47,6 +47,8 @@ if $DRY_RUN; then
     echo "=== DRY RUN MODE ==="
 fi
 
+# Note: DIST_TAG is set later after version detection and added to PUBLISH_FLAGS before publishing
+
 cd "$(dirname "$0")/.."
 ROOT_DIR=$(pwd)
 
@@ -67,6 +69,15 @@ NESTED_PACKAGES=(
 
 # Read version from root package.json
 ROOT_VERSION=$(node -p "require('./package.json').version")
+
+# Determine if this is a prerelease version (contains -)
+DIST_TAG="latest"
+if [[ "$ROOT_VERSION" == *"-"* ]]; then
+    DIST_TAG="next"
+    echo "=== Prerelease detected: publishing with --tag next ==="
+fi
+PUBLISH_FLAGS="$PUBLISH_FLAGS --tag $DIST_TAG"
+
 echo "=== Syncing version $ROOT_VERSION to all packages ==="
 
 for pkg in "${NESTED_PACKAGES[@]}"; do
