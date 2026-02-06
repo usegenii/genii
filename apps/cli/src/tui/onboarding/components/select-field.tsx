@@ -83,6 +83,13 @@ export function SelectField({
 				onChange(option.value);
 			}
 		},
+		onNext: () => {
+			// Enter also commits the highlighted option before advancing
+			const option = options[highlightedIndex];
+			if (option) {
+				onChange(option.value);
+			}
+		},
 	});
 
 	return (

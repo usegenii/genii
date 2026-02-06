@@ -5,7 +5,7 @@
 
 import { Box, Text, useApp } from 'ink';
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { completeOnboarding } from './complete';
 import { WizardNav } from './components/wizard-nav';
 import { loadExistingConfig } from './existing-config-loader';
@@ -55,8 +55,16 @@ function WizardContent({
 	// We don't reset canProceed here because parent effects run after child effects,
 	// which would overwrite the page's validity setting.
 
+	// Ref tracking the latest state so handleNext always reads current values,
+	// even when a child component commits state in the same input event tick.
+	const stateRef = useRef(state);
+	stateRef.current = state;
+
 	const handleCommit = useCallback((updates: Partial<OnboardingState>) => {
 		setState((prev) => ({ ...prev, ...updates }));
+		// Eagerly update ref so handleNext reads the latest state
+		// when both fire in the same tick (e.g. SelectField commit on Enter)
+		stateRef.current = { ...stateRef.current, ...updates };
 	}, []);
 
 	const handleValidityChange = useCallback((valid: boolean) => {
@@ -67,25 +75,32 @@ function WizardContent({
 		// Don't advance unless page reports it's valid
 		if (!canProceed) return;
 
-		if (isLastPage) {
-			// Complete setup - write configs, store secrets, copy templates
-			setIsSubmitting(true);
-			completeOnboarding(state, configPath)
-				.then((result) => {
-					if (!result.success) {
-						throw new Error(result.error ?? 'Unknown error');
-					}
-					onComplete?.();
-					exit();
-				})
-				.catch((err) => {
-					setError(err instanceof Error ? err.message : String(err));
-					setIsSubmitting(false);
-				});
-		} else {
-			setState((prev) => ({ ...prev, currentPage: prev.currentPage + 1 }));
-		}
-	}, [state, isLastPage, canProceed, configPath, onComplete, exit]);
+		// Defer to a microtask so that child component input handlers
+		// (e.g. SelectField committing the highlighted value on Enter)
+		// update stateRef before we read it. Parent useInput handlers
+		// fire before children in ink, so without this the ref would
+		// still hold the pre-commit value.
+		queueMicrotask(() => {
+			if (isLastPage) {
+				// Complete setup - write configs, store secrets, copy templates
+				setIsSubmitting(true);
+				completeOnboarding(stateRef.current, configPath)
+					.then((result) => {
+						if (!result.success) {
+							throw new Error(result.error ?? 'Unknown error');
+						}
+						onComplete?.();
+						exit();
+					})
+					.catch((err) => {
+						setError(err instanceof Error ? err.message : String(err));
+						setIsSubmitting(false);
+					});
+			} else {
+				setState((prev) => ({ ...prev, currentPage: prev.currentPage + 1 }));
+			}
+		});
+	}, [isLastPage, canProceed, configPath, onComplete, exit]);
 
 	const handleBack = useCallback(() => {
 		setState((prev) => ({ ...prev, currentPage: Math.max(0, prev.currentPage - 1) }));
