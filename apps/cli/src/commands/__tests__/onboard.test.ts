@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // we'll test the individual components that make up the non-interactive mode
 
 import { BUILTIN_PROVIDERS, getProvider } from '@genii/config/providers/definitions';
-import { createSecretStore } from '@genii/config/secrets/composite';
+import { FileSecretStore } from '@genii/config/secrets/file';
 import { saveModelsConfig } from '@genii/config/writers/models';
 import { savePreferencesConfig } from '@genii/config/writers/preferences';
 import { saveProvidersConfig } from '@genii/config/writers/providers';
@@ -46,7 +46,7 @@ describe('Onboard Command Integration', () => {
 			}
 
 			// Store API key in secret store
-			const secretStore = await createSecretStore(testDir, 'genii');
+			const secretStore = new FileSecretStore(join(testDir, 'secrets.json'));
 			const secretName = `${providerId}-api-key`;
 			const secretResult = await secretStore.set(secretName, apiKey);
 			expect(secretResult.success).toBe(true);
@@ -89,12 +89,14 @@ describe('Onboard Command Integration', () => {
 
 			// Verify preferences.toml
 			const prefsContent = await readFile(join(testDir, 'preferences.toml'), 'utf-8');
-			expect(prefsContent).toContain('log-level = "info"');
-			expect(prefsContent).toContain('shell-timeout = 30');
+			expect(prefsContent).toContain('[logging]');
+			expect(prefsContent).toContain('level = "info"');
+			expect(prefsContent).toContain('[agents.tools.shell]');
+			expect(prefsContent).toContain('default-timeout = 30');
 		});
 
 		it('should retrieve stored API key from secret store', async () => {
-			const secretStore = await createSecretStore(testDir, 'genii');
+			const secretStore = new FileSecretStore(join(testDir, 'secrets.json'));
 			const apiKey = 'sk-test-secret-key';
 
 			// Store

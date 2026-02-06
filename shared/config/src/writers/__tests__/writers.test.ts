@@ -64,8 +64,10 @@ describe('Config Writers', () => {
 			});
 
 			const content = await readFile(join(testDir, 'preferences.toml'), 'utf-8');
-			expect(content).toContain('log-level = "info"');
-			expect(content).toContain('shell-timeout = 30');
+			expect(content).toContain('[logging]');
+			expect(content).toContain('level = "info"');
+			expect(content).toContain('[agents.tools.shell]');
+			expect(content).toContain('default-timeout = 30');
 		});
 	});
 

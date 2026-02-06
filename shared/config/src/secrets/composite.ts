@@ -34,6 +34,11 @@ async function isNativeSecretStoreAvailable(serviceName: string): Promise<boolea
  * @returns A SecretStore instance appropriate for the platform
  */
 export async function createSecretStore(basePath: string, serviceName: string): Promise<SecretStore> {
+	// Tests should always use deterministic file-backed storage.
+	if (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true') {
+		return new FileSecretStore(join(basePath, 'secrets.json'));
+	}
+
 	// On macOS and Windows, native stores are always available
 	// On Linux, we need to check for libsecret/D-Bus Secret Service
 	if (process.platform === 'darwin' || process.platform === 'win32') {

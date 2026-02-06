@@ -73,6 +73,17 @@ export interface CreateDaemonOptions {
 }
 
 /**
+ * Resolve the daemon log level using precedence:
+ * 1) explicit CLI/runtime override
+ * 2) preferences.toml logging level
+ * 3) default info
+ */
+export function resolveDaemonLogLevel(options: Pick<CreateDaemonOptions, 'logLevel' | 'config'>): LogLevel {
+	const configLogLevel = options.config?.getPreferences()?.logging?.level;
+	return options.logLevel ?? configLogLevel ?? 'info';
+}
+
+/**
  * Get the default socket path for the current platform.
  */
 function getDefaultSocketPath(): string {
@@ -209,7 +220,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
 	const dataPath = options.dataPath ?? getDefaultDataPath();
-	const logLevel = options.logLevel ?? 'info';
+	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {
 		socketPath,
@@ -425,7 +436,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
 	const dataPath = options.dataPath ?? getDefaultDataPath();
-	const logLevel = options.logLevel ?? 'info';
+	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {
 		socketPath,

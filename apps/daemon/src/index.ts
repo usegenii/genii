@@ -24,7 +24,7 @@ import { createSecretStore } from '@genii/config/secrets/composite';
 import { createModelFactory } from '@genii/models/factory';
 import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
-import { type CreateDaemonOptions, createDaemon } from './factory';
+import { type CreateDaemonOptions, createDaemon, resolveDaemonLogLevel } from './factory';
 import { createLogger, type LogLevel } from './logging/logger';
 
 /** Interval for second SIGINT detection (hard shutdown) */
@@ -271,20 +271,19 @@ export async function main(): Promise<void> {
 		process.exit(0);
 	}
 
-	// Create logger for startup messages
-	const logger = createLogger({ level: args.logLevel ?? 'info' });
+	// Determine data path (use default if not specified)
+	const dataPath = args.dataPath ?? getDefaultDataPath();
+
+	const config = await loadConfig({ basePath: dataPath });
+	const logLevel = resolveDaemonLogLevel({ logLevel: args.logLevel, config });
+
+	// Create logger for startup messages (CLI override > preferences > default)
+	const logger = createLogger({ level: logLevel });
 
 	// Set up error handlers
 	setupErrorHandlers(logger);
 
-	logger.info('Starting genii daemon');
-
-	// Determine data path (use default if not specified)
-	const dataPath = args.dataPath ?? getDefaultDataPath();
-
-	// Load configuration from data path
-	logger.debug({ dataPath }, 'Loading configuration');
-	const config = await loadConfig({ basePath: dataPath });
+	logger.info({ dataPath, logLevel }, 'Starting genii daemon');
 
 	// Create secret store
 	const secretStore = await createSecretStore(dataPath, 'genii');
@@ -299,15 +298,13 @@ export async function main(): Promise<void> {
 	// Build daemon options from arguments
 	const options: CreateDaemonOptions = {
 		dataPath,
+		logLevel,
 		modelFactory,
 		channelRegistry,
 		config,
 	};
 	if (args.socketPath !== undefined) {
 		options.socketPath = args.socketPath;
-	}
-	if (args.logLevel !== undefined) {
-		options.logLevel = args.logLevel;
 	}
 	if (args.guidancePath !== undefined) {
 		options.guidancePath = args.guidancePath;
