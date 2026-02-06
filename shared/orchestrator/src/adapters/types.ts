@@ -9,6 +9,7 @@ import type { LoadedSkill } from '../skills/types';
 import type { AgentCheckpoint, InstanceCheckpoint } from '../snapshot/types';
 import type { ToolRegistryInterface } from '../tools/types';
 import type { AgentInput, AgentLimits, AgentSessionId } from '../types/core';
+import type { Logger } from '../types/logger';
 
 /**
  * Adapter for creating and restoring agent instances.
@@ -60,6 +61,8 @@ export interface AdapterCreateConfig {
 	skills?: LoadedSkill[] | undefined;
 	/** Dynamic context injections (systemContext, resumeMessages) */
 	contextInjection?: ContextInjection | undefined;
+	/** Logger for diagnostic output */
+	logger?: Logger | undefined;
 }
 
 /**

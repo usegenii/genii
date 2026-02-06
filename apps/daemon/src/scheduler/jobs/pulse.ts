@@ -131,6 +131,7 @@ export class PulseJob implements ScheduledJob {
 			// Create adapter and spawn agent
 			const adapter = await this._adapterFactory();
 			const handle = await this._coordinator.spawn(adapter, spawnConfig);
+			handle.start();
 
 			this._logger.debug({ sessionId: handle.id }, 'Spawned pulse agent');
 

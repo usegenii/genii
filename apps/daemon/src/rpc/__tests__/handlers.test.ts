@@ -117,6 +117,7 @@ function createMockAgentHandle(id: string): AgentHandle {
 			tags: [],
 		},
 		createdAt: new Date(),
+		start: vi.fn(),
 		pause: vi.fn(),
 		resume: vi.fn(),
 		send: vi.fn(),

@@ -27,6 +27,12 @@ export interface AgentHandle {
 	readonly createdAt: Date;
 
 	/**
+	 * Start the agent execution loop.
+	 * Call this after binding the agent to its destination to avoid race conditions.
+	 */
+	start(): void;
+
+	/**
 	 * Subscribe to agent events.
 	 */
 	subscribe(handler: (event: AgentEvent) => void): Disposable;

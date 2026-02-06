@@ -14,6 +14,7 @@ import type { SuspensionRequest } from '../../tools/types';
 import type { AgentInput, AgentSessionId } from '../../types/core';
 import { generateAgentSessionId } from '../../types/core';
 import type { AdapterCreateConfig, AgentInstance, AgentInstanceStatus } from '../types';
+import { type Logger, noopLogger } from '../../types/logger';
 import { mapPiEvent } from './events';
 import {
 	buildPiTools,
@@ -114,6 +115,7 @@ export class PiAgentInstance implements AgentInstance {
 	private createdAt = Date.now();
 	private apiKeyGetter?: () => Promise<string | undefined>;
 	private thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' = 'low';
+	private logger: Logger;
 
 	constructor(
 		config: AdapterCreateConfig,
@@ -129,6 +131,7 @@ export class PiAgentInstance implements AgentInstance {
 		this.id = options.restoreOptions?.sessionId ?? generateAgentSessionId();
 		this.config = config;
 		this.tracker = createToolExecutionTracker();
+		this.logger = (config.logger ?? noopLogger).child({ component: 'PiAgentInstance', agentId: this.id });
 
 		// Restore timestamps if provided
 		if (options.restoreOptions) {
@@ -216,12 +219,17 @@ export class PiAgentInstance implements AgentInstance {
 		try {
 			// Process initial input
 			const initialInput = this.inputQueue.shift();
+			if (!initialInput?.message) {
+				this.logger.warn('No initial input message — skipping LLM call');
+			}
 			if (initialInput?.message) {
+				this.logger.debug({ messageLength: initialInput.message.length }, 'Processing initial input');
 				// Create async queue for streaming events in real-time
 				const eventQueue = new AsyncEventQueue<AgentEvent>();
 
 				// Subscribe to events and push them to the queue as they arrive
 				const unsubscribe = this.agent.subscribe((piEvent) => {
+					this.logger.debug({ piEventType: piEvent.type }, 'Pi event received');
 					const mapped = mapPiEvent(piEvent, this.toolCallTimes);
 					if (mapped) {
 						if (Array.isArray(mapped)) {
@@ -283,6 +291,13 @@ export class PiAgentInstance implements AgentInstance {
 					throw promptError;
 				}
 
+				// Check if the LLM returned an error response that was silently handled
+				const lastMsg = this.agent.state.messages[this.agent.state.messages.length - 1];
+				if (lastMsg && 'stopReason' in lastMsg && lastMsg.stopReason === 'error') {
+					const errorText = this.extractErrorFromMessage(lastMsg);
+					throw new Error(`LLM returned error response: ${errorText}`);
+				}
+
 				// Check for pending suspensions
 				if (this.pendingRequests.length > 0) {
 					this._status = 'waiting';
@@ -302,6 +317,24 @@ export class PiAgentInstance implements AgentInstance {
 			// Handle completion
 			if (this._status !== 'waiting' && this.pendingRequests.length === 0) {
 				this._status = 'completed';
+				const output = this.getLastAssistantMessage();
+				const lastMessage = this.agent.state.messages[this.agent.state.messages.length - 1];
+				const stopReason = lastMessage && 'stopReason' in lastMessage ? lastMessage.stopReason : undefined;
+				this.logger.debug(
+					{
+						stopReason,
+						hasOutput: output !== undefined,
+						outputLength: output?.length,
+						messageCount: this.agent.state.messages.length,
+					},
+					'Agent completing',
+				);
+				if (output === undefined) {
+					this.logger.warn(
+						{ stopReason, messageCount: this.agent.state.messages.length },
+						'Agent completed with no output text',
+					);
+				}
 				yield {
 					type: 'status',
 					status: 'completed',
@@ -311,7 +344,7 @@ export class PiAgentInstance implements AgentInstance {
 					type: 'done',
 					result: {
 						status: 'completed',
-						output: this.getLastAssistantMessage(),
+						output,
 						metrics: {
 							durationMs: Date.now() - this.startTime,
 							turns: this.turnCount,
@@ -518,6 +551,22 @@ export class PiAgentInstance implements AgentInstance {
 					wakeAt: request.wakeAt,
 				};
 		}
+	}
+
+	private extractErrorFromMessage(msg: AgentMessage): string {
+		// pi-ai stores the error string in errorMessage on AssistantMessage
+		if ('errorMessage' in msg && typeof msg.errorMessage === 'string' && msg.errorMessage) {
+			return msg.errorMessage;
+		}
+		// Fallback: check content array for any text
+		if ('content' in msg && Array.isArray(msg.content)) {
+			for (const part of msg.content) {
+				if (part.type === 'text' && part.text) {
+					return part.text;
+				}
+			}
+		}
+		return 'Unknown error (no details in error response)';
 	}
 
 	private getLastAssistantMessage(): string | undefined {

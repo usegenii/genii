@@ -319,6 +319,7 @@ async function handleAgentSpawn(
 		input: params.input,
 		tags: params.tags,
 	});
+	handle.start();
 
 	logger.info({ agentId: handle.id, model }, 'Agent spawned');
 
@@ -449,6 +450,7 @@ async function handleAgentContinue(
 	const handle = await coordinator.continue(params.sessionId, params.input, adapter, {
 		tools: toolRegistry,
 	});
+	handle.start();
 
 	logger.info({ sessionId: handle.id, model: modelIdentifier }, 'Agent continued');
 

@@ -62,6 +62,7 @@ function createMockAgentHandle(id: AgentSessionId, status: 'running' | 'complete
 		status,
 		config: { guidancePath: '/test/guidance' },
 		createdAt: new Date(),
+		start: vi.fn(),
 		subscribe: vi.fn().mockReturnValue(() => {}),
 		events: vi.fn().mockReturnValue({
 			[Symbol.asyncIterator]: () => ({

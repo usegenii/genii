@@ -15,6 +15,7 @@ import type { ChannelId, Disposable } from '@genii/comms/types/core';
 import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { AgentEvent, CoordinatorEvent } from '@genii/orchestrator/events/types';
+import type { AgentHandle } from '@genii/orchestrator/handle/types';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@genii/orchestrator/types/core';
 import type { CommandExecutorInterface } from '../commands/executor';
@@ -233,6 +234,12 @@ export class MessageRouter implements MessageRouterInterface {
 			this._logger.debug({ agentId, text: event.text, final: event.final }, 'Agent output');
 		} else if (event.type === 'done') {
 			this._logger.debug({ agentId, result: event.result }, 'Agent done');
+			if (event.result.status === 'completed' && event.result.output === undefined) {
+				this._logger.warn(
+					{ agentId, metrics: event.result.metrics },
+					'Agent completed with no output — response will not be sent to user',
+				);
+			}
 		} else if (event.type === 'error') {
 			this._logger.debug({ agentId, error: event.error, fatal: event.fatal }, 'Agent error');
 		}
@@ -348,12 +355,13 @@ export class MessageRouter implements MessageRouterInterface {
 
 		// If no agent is bound, spawn a new one with the initial input
 		if (binding.agentId === null) {
-			const agentId = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, agentId);
+			const handle = await this._spawnAgent(channelId, input);
+			this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
-				{ agentId, destination: `${destination.channelId}:${destination.ref}` },
+				{ agentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned and bound new agent',
 			);
+			handle.start();
 			return;
 		}
 
@@ -385,6 +393,7 @@ export class MessageRouter implements MessageRouterInterface {
 					{ agentId: newHandle.id, message: input.message?.substring(0, 50) },
 					'Continued conversation from checkpoint',
 				);
+				newHandle.start();
 			} catch (error) {
 				this._logger.error({ error, agentId }, 'Error continuing conversation from checkpoint');
 				// Unbind on error so next message will spawn fresh agent
@@ -457,12 +466,13 @@ export class MessageRouter implements MessageRouterInterface {
 			this._logger.info({ agentId }, 'No checkpoint found for agent after restart, spawning new agent');
 			// No checkpoint - unbind and spawn a fresh agent
 			this._conversationManager.unbind(destination);
-			const newAgentId = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, newAgentId);
+			const handle = await this._spawnAgent(channelId, input);
+			this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
-				{ newAgentId, destination: `${destination.channelId}:${destination.ref}` },
+				{ newAgentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned new agent to replace missing one',
 			);
+			handle.start();
 			return;
 		}
 
@@ -476,12 +486,14 @@ export class MessageRouter implements MessageRouterInterface {
 				{ agentId: newHandle.id, message: input.message?.substring(0, 50) },
 				'Restored conversation from checkpoint after restart',
 			);
+			newHandle.start();
 		} catch (error) {
 			this._logger.error({ error, agentId }, 'Failed to restore from checkpoint, spawning new agent');
 			// Failed to restore - unbind and spawn fresh
 			this._conversationManager.unbind(destination);
-			const newAgentId = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, newAgentId);
+			const handle = await this._spawnAgent(channelId, input);
+			this._conversationManager.bind(destination, handle.id);
+			handle.start();
 		}
 	}
 
@@ -491,7 +503,7 @@ export class MessageRouter implements MessageRouterInterface {
 	 * @param channelId - The channel the agent is being spawned for
 	 * @param input - Optional initial input to queue before the agent starts
 	 */
-	private async _spawnAgent(channelId: ChannelId, input?: AgentInput): Promise<AgentSessionId> {
+	private async _spawnAgent(channelId: ChannelId, input?: AgentInput): Promise<AgentHandle> {
 		// Create a temporary session ID for the adapter factory
 		const tempId = crypto.randomUUID() as AgentSessionId;
 		const adapter = await this._adapterFactory(tempId);
@@ -507,8 +519,7 @@ export class MessageRouter implements MessageRouterInterface {
 			input,
 		};
 
-		const handle = await this._coordinator.spawn(adapter, spawnConfig);
-		return handle.id;
+		return this._coordinator.spawn(adapter, spawnConfig);
 	}
 }
 

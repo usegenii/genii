@@ -230,6 +230,7 @@ export class CoordinatorImpl implements Coordinator {
 			metadata: config.metadata,
 			skills,
 			contextInjection,
+			logger: this.logger,
 		});
 
 		// Create handle
@@ -289,8 +290,9 @@ export class CoordinatorImpl implements Coordinator {
 			timestamp: Date.now(),
 		});
 
-		// Start the agent
-		handle.start();
+		// NOTE: handle.start() is NOT called here. Callers must call it after
+		// binding the agent to a destination to avoid the race condition where
+		// events fire before the router has bound the agent.
 
 		return handle;
 	}
@@ -398,6 +400,7 @@ export class CoordinatorImpl implements Coordinator {
 			metadata: checkpoint.session.metadata,
 			skills,
 			contextInjection,
+			logger: this.logger,
 		});
 
 		// Create handle - reusing the session ID from checkpoint
@@ -465,8 +468,9 @@ export class CoordinatorImpl implements Coordinator {
 			timestamp: Date.now(),
 		});
 
-		// Start the agent
-		handle.start();
+		// NOTE: handle.start() is NOT called here. Callers must call it after
+		// binding the agent to a destination to avoid the race condition where
+		// events fire before the router has bound the agent.
 
 		return handle;
 	}
