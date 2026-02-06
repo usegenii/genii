@@ -13,8 +13,8 @@ import { isSuspensionError } from '../../tools/suspension';
 import type { SuspensionRequest } from '../../tools/types';
 import type { AgentInput, AgentSessionId } from '../../types/core';
 import { generateAgentSessionId } from '../../types/core';
-import type { AdapterCreateConfig, AgentInstance, AgentInstanceStatus } from '../types';
 import { type Logger, noopLogger } from '../../types/logger';
+import type { AdapterCreateConfig, AgentInstance, AgentInstanceStatus } from '../types';
 import { mapPiEvent } from './events';
 import {
 	buildPiTools,

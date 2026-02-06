@@ -5,7 +5,12 @@
  */
 
 import type { AuthMethod, ProviderDefinition } from '@genii/config/providers/definitions';
-import { BUILTIN_PROVIDERS, CUSTOM_PROVIDER_DEFINITION, getModelsForProvider, getProvider } from '@genii/config/providers/definitions';
+import {
+	BUILTIN_PROVIDERS,
+	CUSTOM_PROVIDER_DEFINITION,
+	getModelsForProvider,
+	getProvider,
+} from '@genii/config/providers/definitions';
 import type { SetupField } from '@genii/config/providers/types';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
@@ -33,10 +38,7 @@ const SLUG_FIELD: SetupField = {
 };
 
 /** Reserved provider IDs that cannot be used as custom provider slugs. */
-const RESERVED_IDS = new Set([
-	'custom',
-	...BUILTIN_PROVIDERS.map((p) => p.id),
-]);
+const RESERVED_IDS = new Set(['custom', ...BUILTIN_PROVIDERS.map((p) => p.id)]);
 
 /**
  * Validate a custom provider slug.
@@ -59,9 +61,7 @@ function validateSlug(slug: string, existingProviderIds: string[], editingId?: s
 /**
  * Convert existing provider configs to ProviderInstanceState objects.
  */
-function existingToInstanceStates(
-	existingConfig: WizardPageProps['state']['existingConfig'],
-): ProviderInstanceState[] {
+function existingToInstanceStates(existingConfig: WizardPageProps['state']['existingConfig']): ProviderInstanceState[] {
 	if (!existingConfig?.providers || existingConfig.providers.length === 0) return [];
 
 	return existingConfig.providers.map((ep) => {
@@ -140,7 +140,7 @@ export function ProviderSetupPage({
 			}
 			setHasInitialized(true);
 		}
-	}, [hasInitialized, state.existingConfig?.providers, onCommit]);
+	}, [hasInitialized, state.existingConfig, onCommit]);
 
 	// Providers not marked for removal
 	const activeProviders = state.providers.filter((p) => !state.providersToRemove.includes(p.id));
@@ -186,18 +186,14 @@ export function ProviderSetupPage({
 			const inst = state.providers[providerIndex];
 			if (!inst) return;
 
-			const def = inst.type === 'custom'
-				? CUSTOM_PROVIDER_DEFINITION
-				: getProvider(inst.builtinId ?? inst.id);
+			const def = inst.type === 'custom' ? CUSTOM_PROVIDER_DEFINITION : getProvider(inst.builtinId ?? inst.id);
 			if (!def) return;
 
 			setEditingIndex(providerIndex);
 			setWorkingProvider({ ...inst });
 			setProviderDef(def);
 			setAuthMethod(def.authMethods[0] ?? null);
-			setExistingProviderInfo(
-				state.existingConfig?.providers.find((p) => p.providerId === inst.id) ?? null,
-			);
+			setExistingProviderInfo(state.existingConfig?.providers.find((p) => p.providerId === inst.id) ?? null);
 			setValues({
 				slug: inst.id,
 				apiType: inst.custom?.apiType ?? 'anthropic',
@@ -260,13 +256,12 @@ export function ProviderSetupPage({
 		const providerId = existingInfo?.providerId ?? selectedProvider.id;
 
 		// Check if this provider type is already configured (skip for new custom — they get unique slugs)
-		const existingIdx = isCustom && !existingInfo
-			? -1
-			: state.providers.findIndex((p) => p.id === providerId);
+		const existingIdx = isCustom && !existingInfo ? -1 : state.providers.findIndex((p) => p.id === providerId);
 
 		if (existingIdx >= 0) {
 			// Enter edit mode for the existing provider
-			const inst = state.providers[existingIdx]!;
+			const inst = state.providers[existingIdx];
+			if (!inst) return;
 			setEditingIndex(existingIdx);
 			setWorkingProvider({ ...inst });
 			setValues({
@@ -434,7 +429,8 @@ export function ProviderSetupPage({
 	});
 
 	// --- Models step ---
-	const workingProviderId = workingProvider?.existingProviderId ?? workingProvider?.builtinId ?? workingProvider?.id ?? '';
+	const workingProviderId =
+		workingProvider?.existingProviderId ?? workingProvider?.builtinId ?? workingProvider?.id ?? '';
 	const isCustomProvider = workingProvider?.type === 'custom';
 	const availableModels = isCustomProvider ? [] : getModelsForProvider(workingProviderId);
 	const existingModelsForProvider = getExistingModelsForProvider(state.existingConfig, workingProviderId);
@@ -499,7 +495,10 @@ export function ProviderSetupPage({
 	};
 
 	useWizardKeyboard({
-		enabled: step === 'models' && (effectiveModelFocusMode === 'list' || (effectiveModelFocusMode === 'input' && customModelInput.trim().length === 0)),
+		enabled:
+			step === 'models' &&
+			(effectiveModelFocusMode === 'list' ||
+				(effectiveModelFocusMode === 'input' && customModelInput.trim().length === 0)),
 		onBack: () => setStep('authFields'),
 		onNext: () => {
 			if (workingSelectedModels.length > 0) {
@@ -541,9 +540,7 @@ export function ProviderSetupPage({
 			</Box>
 
 			<Box marginBottom={1}>
-				<Text color={theme.hint}>
-					Configure at least one AI provider with models for your genii to use.
-				</Text>
+				<Text color={theme.hint}>Configure at least one AI provider with models for your genii to use.</Text>
 			</Box>
 
 			{step === 'list' && (
@@ -558,11 +555,7 @@ export function ProviderSetupPage({
 						const isSelected = index === selectedIndex;
 						const isMarkedForRemoval = state.providersToRemove.includes(inst.id);
 						const modelCount = inst.selectedModels.length;
-						const badge = isMarkedForRemoval
-							? ' [removing]'
-							: inst.isExisting
-								? ' [configured]'
-								: ' [new]';
+						const badge = isMarkedForRemoval ? ' [removing]' : inst.isExisting ? ' [configured]' : ' [new]';
 						const badgeColor = isMarkedForRemoval
 							? theme.error
 							: inst.isExisting
@@ -571,9 +564,7 @@ export function ProviderSetupPage({
 
 						return (
 							<Box key={inst.id} marginLeft={1}>
-								<Text color={isSelected ? theme.primary : theme.muted}>
-									{isSelected ? '❯ ' : '  '}
-								</Text>
+								<Text color={isSelected ? theme.primary : theme.muted}>{isSelected ? '❯ ' : '  '}</Text>
 								<Text
 									color={isMarkedForRemoval ? theme.muted : isSelected ? theme.label : theme.muted}
 									strikethrough={isMarkedForRemoval}
@@ -582,7 +573,8 @@ export function ProviderSetupPage({
 									{getProviderDisplayName(inst)}
 								</Text>
 								<Text color={theme.hint}>
-									{' '}- {modelCount} model{modelCount !== 1 ? 's' : ''}
+									{' '}
+									- {modelCount} model{modelCount !== 1 ? 's' : ''}
 								</Text>
 								<Text color={badgeColor}>{badge}</Text>
 							</Box>
@@ -687,9 +679,7 @@ export function ProviderSetupPage({
 						<Text color={theme.label}>
 							Provider: <Text color={theme.primary}>{getProviderLabel()}</Text>
 						</Text>
-						{existingProviderInfo && (
-							<Text color={theme.hint}> (editing existing configuration)</Text>
-						)}
+						{existingProviderInfo && <Text color={theme.hint}> (editing existing configuration)</Text>}
 					</Box>
 					{authMethod.fields.some((f) => f.id === 'apiKey') && existingProviderInfo?.hasStoredApiKey ? (
 						<ApiKeyField

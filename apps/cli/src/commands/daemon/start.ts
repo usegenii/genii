@@ -45,7 +45,6 @@ async function waitForDaemon(timeoutMs: number = 5000): Promise<boolean> {
 	return false;
 }
 
-
 interface StartOptions {
 	foreground?: boolean;
 	background?: boolean;

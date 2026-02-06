@@ -4,8 +4,8 @@
  */
 
 import { join } from 'node:path';
-import type { PreferencesConfig } from '../types/preferences.js';
 import { readTomlFileOptional } from '../loaders/toml.js';
+import type { PreferencesConfig } from '../types/preferences.js';
 import { writeTomlFile } from './toml.js';
 
 /**
