@@ -17,9 +17,9 @@ export interface FormFieldProps {
 	onChange: (value: string) => void;
 	/** Whether the field is focused */
 	isFocused?: boolean;
-	/** Called when up is pressed at the first option (for select fields) */
+	/** Called when navigating up past the field (arrow keys for selects, up arrow/Tab for text) */
 	onBoundaryUp?: () => void;
-	/** Called when down is pressed at the last option (for select fields) */
+	/** Called when navigating down past the field (arrow keys for selects, down arrow/Tab for text) */
 	onBoundaryDown?: () => void;
 	/** Submit handler (for text fields) */
 	onSubmit?: () => void;
@@ -64,6 +64,9 @@ export function FormField({
 					isPassword={true}
 					isFocused={isFocused}
 					onSubmit={onSubmit}
+					onTab={onBoundaryDown}
+					onUp={onBoundaryUp}
+					onDown={onBoundaryDown}
 				/>
 			);
 
@@ -77,6 +80,9 @@ export function FormField({
 					hint={field.hint}
 					isFocused={isFocused}
 					onSubmit={onSubmit}
+					onTab={onBoundaryDown}
+					onUp={onBoundaryUp}
+					onDown={onBoundaryDown}
 				/>
 			);
 	}

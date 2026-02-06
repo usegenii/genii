@@ -12,7 +12,6 @@ import { loadExistingConfig } from './existing-config-loader';
 import { useTerminalTheme } from './hooks/use-terminal-theme';
 import { ChannelSetupPage } from './pages/channel-setup';
 import { DisclaimerPage } from './pages/disclaimer';
-import { ModelSelectionPage } from './pages/model-selection';
 import { PreferencesPage } from './pages/preferences';
 import { ProviderSetupPage } from './pages/provider-setup';
 import { PulsePage } from './pages/pulse';
@@ -124,8 +123,6 @@ function WizardContent({
 				return <DisclaimerPage {...pageProps} />;
 			case 'provider':
 				return <ProviderSetupPage {...pageProps} />;
-			case 'models':
-				return <ModelSelectionPage {...pageProps} />;
 			case 'channels':
 				return <ChannelSetupPage {...pageProps} />;
 			case 'preferences':

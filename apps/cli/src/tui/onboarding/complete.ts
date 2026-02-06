@@ -59,74 +59,104 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	// Derive config path from guidance path (remove /guidance suffix)
 	const configPath = guidancePath.replace(/\/guidance$/, '');
 
-	// Get provider details
-	const isCustomProvider = state.provider.type === 'custom';
-	const providerId = isCustomProvider ? 'custom' : (state.provider.builtinId ?? 'zai');
-	const providerDef = isCustomProvider ? CUSTOM_PROVIDER_DEFINITION : getProvider(providerId);
-
-	if (!providerDef) {
-		return { success: false, error: `Unknown provider: ${providerId}` };
-	}
-
-	// Get API key and base URL based on provider type
-	const apiKey = isCustomProvider ? state.provider.custom?.apiKey : state.provider.apiKey;
-	const baseUrl = isCustomProvider ? state.provider.custom?.baseUrl : providerDef.defaultBaseUrl;
-	const apiType = isCustomProvider ? (state.provider.custom?.apiType ?? 'anthropic') : providerDef.apiType;
-
-	// Check if we should keep the existing API key
-	const keepExistingApiKey = state.provider.keepExistingApiKey ?? false;
-
-	if (!keepExistingApiKey && !apiKey) {
-		return { success: false, error: 'API key is required' };
-	}
-
-	if (!baseUrl) {
-		return { success: false, error: 'Base URL is required' };
-	}
-
-	// 1. Store API key in OS keychain / secret store (skip if keeping existing)
+	// 1. Create secret store
 	const secretStore = await createSecretStore(configPath, 'genii');
-	const secretName = `${providerId}-api-key`;
 
-	if (!keepExistingApiKey && apiKey) {
-		const secretResult = await secretStore.set(secretName, apiKey);
+	// 2. Process all providers (skip those marked for removal)
+	const providerConfigs: Record<string, { type: 'anthropic' | 'openai'; baseUrl: string; credential: string }> = {};
+	const allSelectedModels: string[] = [];
+	const modelsConfig: Record<string, ModelConfigWrite> = {};
 
-		if (!secretResult.success) {
-			return { success: false, error: `Failed to store API key: ${secretResult.error}` };
+	for (const provider of state.providers) {
+		if (state.providersToRemove.includes(provider.id)) continue;
+
+		const isCustomProvider = provider.type === 'custom';
+		const providerId = isCustomProvider ? provider.id : (provider.builtinId ?? provider.id);
+		const providerDef = isCustomProvider ? CUSTOM_PROVIDER_DEFINITION : getProvider(providerId);
+
+		if (!providerDef) {
+			return { success: false, error: `Unknown provider: ${providerId}` };
 		}
-	}
 
-	// 2. Write providers.toml
-	await saveProvidersConfig(configPath, {
-		[providerId]: {
+		const apiKey = isCustomProvider ? provider.custom?.apiKey : provider.apiKey;
+		const baseUrl = isCustomProvider ? provider.custom?.baseUrl : providerDef.defaultBaseUrl;
+		const apiType = isCustomProvider ? (provider.custom?.apiType ?? 'anthropic') : providerDef.apiType;
+		const keepExistingApiKey = provider.keepExistingApiKey ?? false;
+
+		if (!keepExistingApiKey && !apiKey) {
+			return { success: false, error: `API key is required for provider ${providerId}` };
+		}
+
+		if (!baseUrl) {
+			return { success: false, error: `Base URL is required for provider ${providerId}` };
+		}
+
+		// Store API key in OS keychain / secret store (skip if keeping existing)
+		const secretName = `${providerId}-api-key`;
+
+		if (!keepExistingApiKey && apiKey) {
+			const secretResult = await secretStore.set(secretName, apiKey);
+			if (!secretResult.success) {
+				return { success: false, error: `Failed to store API key for ${providerId}: ${secretResult.error}` };
+			}
+		}
+
+		// Build provider config entry
+		providerConfigs[providerId] = {
 			type: apiType,
 			baseUrl,
 			credential: `secret:${secretName}`,
-		},
-	});
+		};
 
-	// 3. Write models.toml (and remove deselected models)
+		// Collect models for this provider
+		for (const modelId of provider.selectedModels) {
+			modelsConfig[modelId] = {
+				provider: providerId,
+				modelId,
+			};
+			allSelectedModels.push(modelId);
+		}
+	}
+
+	// 3. Write providers.toml (with removal support)
+	await saveProvidersConfig(configPath, providerConfigs, state.providersToRemove);
+
+	// 4. Write models.toml
 	const modelsPath = join(configPath, 'models.toml');
 	const existingModels = await readTomlFileOptional<Record<string, ModelConfigWrite>>(modelsPath);
 
-	// Start with existing models, removing ones marked for removal
-	const modelsConfig: Record<string, ModelConfigWrite> = { ...existingModels };
-	for (const modelId of state.modelsToRemove ?? []) {
-		delete modelsConfig[modelId];
+	// Start with existing models
+	const finalModelsConfig: Record<string, ModelConfigWrite> = { ...existingModels };
+
+	// Remove models belonging to removed providers
+	if (state.providersToRemove.length > 0) {
+		for (const [modelId, modelConfig] of Object.entries(finalModelsConfig)) {
+			if (state.providersToRemove.includes(modelConfig.provider)) {
+				delete finalModelsConfig[modelId];
+			}
+		}
 	}
 
-	// Add/update selected models
-	for (const modelId of state.selectedModels) {
-		modelsConfig[modelId] = {
-			provider: providerId,
-			modelId,
-		};
+	// Remove existing models that were deselected (for active providers)
+	for (const provider of state.providers) {
+		if (state.providersToRemove.includes(provider.id)) continue;
+		const providerId = provider.type === 'custom' ? provider.id : (provider.builtinId ?? provider.id);
+
+		// Find existing models for this provider that are no longer selected
+		for (const [modelId, modelConfig] of Object.entries(finalModelsConfig)) {
+			if (modelConfig.provider === providerId && !provider.selectedModels.includes(modelId)) {
+				delete finalModelsConfig[modelId];
+			}
+		}
 	}
 
-	// Write the full config (not using merge since we've already handled it)
-	await writeTomlFile(modelsPath, modelsConfig);
+	// Add/update selected models across all active providers
+	Object.assign(finalModelsConfig, modelsConfig);
 
-	// 4. Write channels.toml and store channel credentials
+	// Write the full config
+	await writeTomlFile(modelsPath, finalModelsConfig);
+
+	// 5. Write channels.toml and store channel credentials
 	if (state.channels.length > 0) {
 		const channelConfigs: Record<string, { type: string; credential: string; [key: string]: unknown }> = {};
 
@@ -177,15 +207,15 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		await saveChannelsConfig(configPath, channelConfigs, state.channelsToRemove);
 	}
 
-	// 5. Write preferences.toml (defaultModels only written if none exist)
+	// 6. Write preferences.toml (defaultModels only written if none exist)
 	await savePreferencesConfig(configPath, {
 		logLevel: state.preferences.logLevel,
 		shellTimeout: state.preferences.shellTimeout,
 		timezone: state.preferences.timezone,
-		defaultModels: state.selectedModels,
+		defaultModels: allSelectedModels,
 	});
 
-	// 6. Write pulse/scheduler config if enabled
+	// 7. Write pulse/scheduler config if enabled
 	if (state.pulse.enabled) {
 		const pulseSchedule = intervalToCron(state.pulse.interval);
 		const prefsPath = join(configPath, 'preferences.toml');
@@ -204,7 +234,7 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		await writeTomlFile(prefsPath, schedulerConfig);
 	}
 
-	// 7. Copy templates via daemon
+	// 8. Copy templates via daemon
 	let templatesCopied: string[] = [];
 	let templatesBackedUp: string[] = [];
 

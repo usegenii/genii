@@ -30,6 +30,10 @@ export interface TextInputFieldProps {
 	onSubmit?: () => void;
 	/** Tab handler for switching focus */
 	onTab?: () => void;
+	/** Called when up arrow is pressed (for field-to-field navigation) */
+	onUp?: () => void;
+	/** Called when down arrow is pressed (for field-to-field navigation) */
+	onDown?: () => void;
 }
 
 /**
@@ -46,13 +50,17 @@ export function TextInputField({
 	isFocused = true,
 	onSubmit,
 	onTab,
+	onUp,
+	onDown,
 }: TextInputFieldProps): React.ReactElement {
 	const theme = useTerminalTheme();
 
-	// Handle Tab key for focus navigation
+	// Handle Tab and arrow keys for field-to-field navigation
 	useWizardKeyboard({
-		enabled: isFocused && onTab !== undefined,
+		enabled: isFocused && (onTab !== undefined || onUp !== undefined || onDown !== undefined),
 		onTab,
+		onUp,
+		onDown,
 	});
 
 	return (

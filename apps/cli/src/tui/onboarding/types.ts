@@ -10,7 +10,7 @@ import type { ProviderConfig } from '@genii/config/types/provider';
 /**
  * Page identifiers for the wizard.
  */
-export type PageId = 'disclaimer' | 'provider' | 'models' | 'channels' | 'preferences' | 'pulse' | 'templates';
+export type PageId = 'disclaimer' | 'provider' | 'channels' | 'preferences' | 'pulse' | 'templates';
 
 /**
  * Information about an existing configured provider.
@@ -64,7 +64,7 @@ export interface ExistingConfig {
 }
 
 /**
- * Provider configuration in onboarding state.
+ * Provider configuration in onboarding state (legacy single-provider).
  */
 export interface ProviderState {
 	type: 'builtin' | 'custom';
@@ -79,6 +79,27 @@ export interface ProviderState {
 	existingProviderId?: string;
 	/** Whether to preserve the stored API key */
 	keepExistingApiKey?: boolean;
+}
+
+/**
+ * State for a provider instance being configured in onboarding.
+ * Each instance corresponds to one provider definition (one per type).
+ */
+export interface ProviderInstanceState {
+	/** Provider definition ID used as unique key (e.g., "zai", "custom") */
+	id: string;
+	type: 'builtin' | 'custom';
+	builtinId?: string;
+	apiKey?: string;
+	custom?: {
+		apiType: 'anthropic' | 'openai';
+		baseUrl: string;
+		apiKey?: string;
+	};
+	keepExistingApiKey?: boolean;
+	existingProviderId?: string;
+	selectedModels: string[];
+	isExisting?: boolean;
 }
 
 /**
@@ -111,8 +132,10 @@ export interface TemplatesState {
 export interface OnboardingState {
 	currentPage: number;
 	disclaimerAccepted: boolean;
-	provider: ProviderState;
-	selectedModels: string[];
+	/** Provider instances being configured */
+	providers: ProviderInstanceState[];
+	/** Providers that should be removed during completion */
+	providersToRemove: string[];
 	preferences: PreferencesState;
 	pulse: PulseState;
 	templates: TemplatesState;
@@ -122,8 +145,6 @@ export interface OnboardingState {
 	channelsToRemove: string[];
 	/** Existing configuration loaded from config files */
 	existingConfig?: ExistingConfig;
-	/** Models that should be removed during completion */
-	modelsToRemove: string[];
 }
 
 /**
@@ -152,8 +173,7 @@ export interface PageInfo {
  */
 export const PAGES: PageInfo[] = [
 	{ id: 'disclaimer', title: 'Disclaimer', description: 'Safety warning and acceptance' },
-	{ id: 'provider', title: 'Provider Setup', description: 'Configure your AI provider' },
-	{ id: 'models', title: 'Model Selection', description: 'Choose models to use' },
+	{ id: 'provider', title: 'Provider & Model Setup', description: 'Configure AI providers and models' },
 	{ id: 'channels', title: 'Channels', description: 'Configure messaging channels' },
 	{ id: 'preferences', title: 'Preferences', description: 'General settings' },
 	{ id: 'pulse', title: 'Pulse', description: 'Proactive work scheduling' },
@@ -166,10 +186,8 @@ export const PAGES: PageInfo[] = [
 export const DEFAULT_STATE: OnboardingState = {
 	currentPage: 0,
 	disclaimerAccepted: false,
-	provider: {
-		type: 'builtin',
-	},
-	selectedModels: [],
+	providers: [],
+	providersToRemove: [],
 	preferences: {
 		logLevel: 'info',
 		shellTimeout: 30,
@@ -183,5 +201,4 @@ export const DEFAULT_STATE: OnboardingState = {
 	},
 	channels: [],
 	channelsToRemove: [],
-	modelsToRemove: [],
 };

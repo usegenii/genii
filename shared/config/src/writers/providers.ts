@@ -35,17 +35,27 @@ export interface ProviderConfigWrite {
 export async function saveProvidersConfig(
 	basePath: string,
 	providers: Record<string, ProviderConfigWrite>,
+	providersToRemove?: string[],
 ): Promise<void> {
 	const filePath = join(basePath, 'providers.toml');
 
 	// Load existing providers if they exist
 	const existing = await readTomlFileOptional<Record<string, ProviderConfigWrite>>(filePath);
 
-	// Merge new providers with existing (new providers take precedence for same key)
-	const merged = {
-		...existing,
-		...providers,
-	};
+	// Start with existing data
+	const merged: Record<string, unknown> = { ...existing };
+
+	// Remove providers marked for deletion
+	if (providersToRemove) {
+		for (const name of providersToRemove) {
+			delete merged[name];
+		}
+	}
+
+	// Merge new providers (new take precedence for same key)
+	for (const [key, value] of Object.entries(providers)) {
+		merged[key] = value;
+	}
 
 	await writeTomlFile(filePath, merged);
 }
