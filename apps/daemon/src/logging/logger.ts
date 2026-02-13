@@ -53,7 +53,12 @@ export type Logger = pino.Logger;
 export function createLogger(config: Partial<LoggerConfig> = {}): Logger {
 	const level = config.level ?? 'info';
 
-	const pinoOpts: pino.LoggerOptions = { level };
+	const pinoOpts: pino.LoggerOptions = {
+		level,
+		serializers: {
+			error: pino.stdSerializers.err,
+		},
+	};
 	if (config.context) {
 		pinoOpts.base = config.context;
 	}
