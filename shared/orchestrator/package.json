@@ -42,7 +42,7 @@
 		"chrono-node": "^2.9.0"
 	},
 	"devDependencies": {
-		"@types/node": "^22.19.7",
+		"@types/node": "^24.0.0",
 		"tsup": "8.5.1",
 		"typescript": "5.9.3",
 		"vitest": "^3.2.2"

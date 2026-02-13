@@ -34,7 +34,7 @@
 	},
 	"packageManager": "pnpm@10.29.1",
 	"devDependencies": {
-		"@types/node": "^22.19.7",
+		"@types/node": "^24.0.0",
 		"tsup": "8.5.1",
 		"typescript": "5.9.3"
 	}
