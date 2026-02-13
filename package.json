@@ -1,6 +1,6 @@
 {
 	"name": "usegenii",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "CLI and daemon for managing AI agents and communication channels",
 	"type": "module",
 	"bin": {
