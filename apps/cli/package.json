@@ -12,7 +12,8 @@
 		".": {
 			"import": "./dist/index.js",
 			"types": "./dist/index.d.ts"
-		}
+		},
+		"./genii": "./dist/genii.js"
 	},
 	"files": [
 		"dist"

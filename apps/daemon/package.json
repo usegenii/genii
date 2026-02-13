@@ -12,7 +12,8 @@
 		".": {
 			"import": "./dist/index.js",
 			"types": "./dist/index.d.ts"
-		}
+		},
+		"./daemon": "./dist/daemon.js"
 	},
 	"files": [
 		"dist"

@@ -4,9 +4,12 @@
 	"description": "CLI and daemon for managing AI agents and communication channels",
 	"type": "module",
 	"bin": {
-		"genii": "./node_modules/@genii/cli/dist/genii.js",
-		"genii-daemon": "./node_modules/@genii/daemon/dist/daemon.js"
+		"genii": "./bin/genii.js",
+		"genii-daemon": "./bin/genii-daemon.js"
 	},
+	"files": [
+		"bin"
+	],
 	"scripts": {
 		"build": "turbo run build",
 		"dev": "turbo run dev",
