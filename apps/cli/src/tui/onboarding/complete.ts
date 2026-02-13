@@ -114,7 +114,7 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 				provider: providerId,
 				modelId,
 			};
-			allSelectedModels.push(modelId);
+			allSelectedModels.push(`${providerId}/${modelId}`);
 		}
 	}
 

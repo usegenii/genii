@@ -164,7 +164,7 @@ export function registerOnboardCommand(program: Command): void {
 					await savePreferencesConfig(configPath, {
 						logLevel: (options.logLevel as 'debug' | 'info' | 'warn' | 'error') ?? 'info',
 						shellTimeout: 30,
-						defaultModels: modelIds,
+						defaultModels: modelIds.map((id: string) => `${options.provider}/${id}`),
 					});
 					formatter.message('Preferences configured', 'success');
 
