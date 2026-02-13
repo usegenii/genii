@@ -47,7 +47,8 @@
 		"@genii/orchestrator": "workspace:*",
 		"croner": "^9.0.0",
 		"pino": "^9.0.0",
-		"pino-pretty": "^11.0.0"
+		"pino-pretty": "^11.0.0",
+		"pino-roll": "^2.0.0"
 	},
 	"devDependencies": {
 		"@types/node": "^24.0.0",

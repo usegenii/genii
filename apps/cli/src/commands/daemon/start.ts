@@ -4,6 +4,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+import { getDefaultBasePath } from '@genii/config/paths';
 import type { Command } from 'commander';
 import { createDaemonClient, getSocketPath } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
@@ -90,8 +92,10 @@ export function startCommand(daemon: Command): void {
 				const socketPath = getSocketPath();
 
 				// Build command line arguments for the daemon
+				const dataPath = options.data ?? getDefaultBasePath();
 				const daemonArgs: string[] = [];
 				daemonArgs.push('--socket', socketPath);
+				daemonArgs.push('--log-dir', join(dataPath, 'logs'));
 				if (options.data) {
 					daemonArgs.push('--data', options.data);
 				}

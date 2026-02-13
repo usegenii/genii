@@ -4,8 +4,13 @@
  * Uses pino for structured JSON logging with support for:
  * - Log levels
  * - Child loggers with context
+ * - File logging with daily rotation via pino-roll
  * - Pretty printing in development
  */
+
+import { join } from 'node:path';
+import type { TransportTargetOptions } from 'pino';
+import pino from 'pino';
 
 /**
  * Log level.
@@ -18,108 +23,76 @@ export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 export interface LoggerConfig {
 	/** Minimum log level */
 	level: LogLevel;
-	/** Whether to use pretty printing */
+	/** Whether to use pretty printing (requires stdout to be a TTY) */
 	pretty?: boolean;
+	/** Directory for log files (enables file logging with rotation when set) */
+	logDir?: string;
 	/** Base context to include in all logs */
 	context?: Record<string, unknown>;
 }
 
 /**
- * Logger interface matching pino's API.
+ * Logger instance. Re-exported from pino for full API compatibility.
  */
-export interface Logger {
-	/**
-	 * Log a trace message.
-	 */
-	trace(msg: string): void;
-	trace(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Log a debug message.
-	 */
-	debug(msg: string): void;
-	debug(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Log an info message.
-	 */
-	info(msg: string): void;
-	info(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Log a warning message.
-	 */
-	warn(msg: string): void;
-	warn(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Log an error message.
-	 */
-	error(msg: string): void;
-	error(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Log a fatal message.
-	 */
-	fatal(msg: string): void;
-	fatal(obj: Record<string, unknown>, msg: string): void;
-
-	/**
-	 * Create a child logger with additional context.
-	 *
-	 * @param bindings - Additional context to include
-	 * @returns A child logger
-	 */
-	child(bindings: Record<string, unknown>): Logger;
-}
+export type Logger = pino.Logger;
 
 /**
  * Create a logger instance.
  *
- * In production, uses pino for JSON logging.
- * In development, uses pino-pretty for readable output.
+ * When `logDir` is provided, logs are written to `{logDir}/daemon.log` with:
+ * - Daily rotation (new file each day)
+ * - Size-based rotation (new file at 10 MB)
+ * - Retention of last 7 rotated files
+ *
+ * When `pretty` is true and stdout is a TTY, also writes human-readable
+ * output to stdout (useful for foreground/development mode).
  *
  * @param config - Logger configuration
- * @returns A configured logger instance
+ * @returns A configured pino logger instance
  */
 export function createLogger(config: Partial<LoggerConfig> = {}): Logger {
-	// TODO: Import and configure pino
-	// TODO: Add pino-pretty transport in development
-	// TODO: Add file transport for production
-
 	const level = config.level ?? 'info';
-	const _context = config.context ?? {};
 
-	// Stub implementation - replace with pino
-	const createLogMethod =
-		(methodLevel: LogLevel) =>
-		(msgOrObj: string | Record<string, unknown>, msg?: string): void => {
-			const levels: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
-			if (levels.indexOf(methodLevel) < levels.indexOf(level)) {
-				return;
-			}
+	const pinoOpts: pino.LoggerOptions = { level };
+	if (config.context) {
+		pinoOpts.base = config.context;
+	}
 
-			if (typeof msgOrObj === 'string') {
-				console.log(`[${methodLevel.toUpperCase()}] ${msgOrObj}`);
-			} else {
-				console.log(`[${methodLevel.toUpperCase()}] ${msg}`, msgOrObj);
-			}
-		};
+	const targets: TransportTargetOptions[] = [];
 
-	const logger: Logger = {
-		trace: createLogMethod('trace') as Logger['trace'],
-		debug: createLogMethod('debug') as Logger['debug'],
-		info: createLogMethod('info') as Logger['info'],
-		warn: createLogMethod('warn') as Logger['warn'],
-		error: createLogMethod('error') as Logger['error'],
-		fatal: createLogMethod('fatal') as Logger['fatal'],
-		child: (_bindings: Record<string, unknown>): Logger => {
-			// TODO: Create child logger with merged bindings
-			return logger;
-		},
-	};
+	// File logging with rotation
+	if (config.logDir) {
+		targets.push({
+			target: 'pino-roll',
+			options: {
+				file: join(config.logDir, 'daemon.log'),
+				frequency: 'daily',
+				size: '10m',
+				limit: { count: 7 },
+				mkdir: true,
+			},
+			level,
+		});
+	}
 
-	return logger;
+	// Pretty stdout in development/foreground mode
+	if (config.pretty && process.stdout.isTTY) {
+		targets.push({
+			target: 'pino-pretty',
+			options: { colorize: true },
+			level,
+		});
+	}
+
+	// No transports configured — use default pino (JSON to stdout)
+	if (targets.length === 0) {
+		return pino(pinoOpts);
+	}
+
+	return pino({
+		...pinoOpts,
+		transport: targets.length === 1 ? targets[0] : { targets },
+	});
 }
 
 /**

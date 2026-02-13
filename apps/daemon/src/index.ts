@@ -35,6 +35,7 @@ const HARD_SHUTDOWN_INTERVAL_MS = 3000;
 interface ParsedArgs {
 	socketPath?: string;
 	logLevel?: LogLevel;
+	logDir?: string;
 	dataPath?: string;
 	guidancePath?: string;
 	help: boolean;
@@ -46,6 +47,7 @@ interface ParsedArgs {
  * Supported arguments:
  * - --socket, -s: Override socket path
  * - --log-level, -l: Override log level (trace, debug, info, warn, error)
+ * - --log-dir: Write logs to files in the given directory (with rotation)
  * - --data, -d: Override data directory (stores config, conversations, snapshots, guidance)
  * - --guidance, -g: Override guidance directory (defaults to {dataPath}/guidance)
  * - --help, -h: Show help
@@ -60,6 +62,9 @@ function parseArguments(): ParsedArgs {
 			'log-level': {
 				type: 'string',
 				short: 'l',
+			},
+			'log-dir': {
+				type: 'string',
 			},
 			data: {
 				type: 'string',
@@ -92,6 +97,7 @@ function parseArguments(): ParsedArgs {
 	return {
 		socketPath: values.socket,
 		logLevel: logLevel as LogLevel | undefined,
+		logDir: values['log-dir'],
 		dataPath: values.data,
 		guidancePath: values.guidance,
 		help: values.help ?? false,
@@ -110,6 +116,7 @@ Usage: genii-daemon [options]
 Options:
   -s, --socket <path>      Override socket path for IPC
   -l, --log-level <level>  Log level (trace, debug, info, warn, error)
+      --log-dir <path>     Write logs to files in this directory (with rotation)
   -d, --data <path>        Override data directory (config, conversations, snapshots, guidance)
   -g, --guidance <path>    Override guidance directory (defaults to {data}/guidance)
   -h, --help               Show this help message
@@ -262,7 +269,10 @@ export async function main(): Promise<void> {
 	const logLevel = resolveDaemonLogLevel({ logLevel: args.logLevel, config });
 
 	// Create logger for startup messages (CLI override > preferences > default)
-	const logger = createLogger({ level: logLevel });
+	// File logging is only enabled when --log-dir is explicitly passed (e.g. by `genii daemon start`).
+	// Running genii-daemon directly logs to stdout.
+	const logDir = args.logDir;
+	const logger = createLogger({ level: logLevel, logDir });
 
 	// Set up error handlers
 	setupErrorHandlers(logger);
@@ -283,6 +293,7 @@ export async function main(): Promise<void> {
 	const options: CreateDaemonOptions = {
 		dataPath,
 		logLevel,
+		logDir,
 		modelFactory,
 		channelRegistry,
 		config,

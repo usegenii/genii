@@ -60,6 +60,8 @@ export interface CreateDaemonOptions {
 	socketPath?: string;
 	/** Override log level */
 	logLevel?: LogLevel;
+	/** Directory for log files (enables file logging with rotation when set) */
+	logDir?: string;
 	/** Override data directory (stores config, conversations, snapshots, guidance) */
 	dataPath?: string;
 	/** Override guidance directory (defaults to {dataPath}/guidance) */
@@ -213,8 +215,8 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		logLevel,
 	};
 
-	// Create logger
-	const logger = createLogger({ level: logLevel });
+	// Create logger (file output only when logDir is explicitly provided)
+	const logger = createLogger({ level: logLevel, logDir: options.logDir });
 
 	// Resolve guidance path early so we can log it
 	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
@@ -429,8 +431,8 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		logLevel,
 	};
 
-	// Use provided logger or create one
-	const logger = options.logger ?? createLogger({ level: logLevel });
+	// Use provided logger or create one (file output only when logDir is explicitly provided)
+	const logger = options.logger ?? createLogger({ level: logLevel, logDir: options.logDir });
 
 	// Resolve guidance path early so we can log it
 	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
