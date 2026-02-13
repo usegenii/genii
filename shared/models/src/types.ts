@@ -62,32 +62,3 @@ export interface SessionModelOptions {
 	/** Override thinking level for this session */
 	thinkingLevel?: ThinkingLevel;
 }
-
-/**
- * Parse a model identifier string into provider and model name components.
- * @param identifier - Model identifier in format "provider/model-name"
- * @returns Parsed components
- * @throws Error if the identifier format is invalid
- */
-export function parseModelIdentifier(identifier: string): ParsedModelIdentifier {
-	const parts = identifier.split('/');
-	if (parts.length !== 2 || !parts[0] || !parts[1]) {
-		throw new Error(
-			`Invalid model identifier format: "${identifier}". Expected format: "provider/model-name" (e.g., "anthropic/opus-4.5")`,
-		);
-	}
-	return {
-		provider: parts[0],
-		modelName: parts[1],
-	};
-}
-
-/**
- * Create a model identifier from provider and model name.
- * @param provider - Provider name
- * @param modelName - Model name
- * @returns Model identifier string
- */
-export function createModelIdentifier(provider: string, modelName: string): ModelIdentifier {
-	return `${provider}/${modelName}` as ModelIdentifier;
-}

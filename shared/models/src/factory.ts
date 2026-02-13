@@ -9,8 +9,8 @@ import { createPiAdapter } from '@genii/orchestrator/adapters/pi/adapter';
 import type { PiAdapterOptions } from '@genii/orchestrator/adapters/pi/types';
 import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import { isValidProviderType, resolveThinkingLevel } from './capabilities';
+import { parseModelIdentifier } from './identifier';
 import type { ModelFactoryOptions, ProviderType, ResolvedModelConfig, SessionModelOptions } from './types';
-import { parseModelIdentifier } from './types';
 
 /**
  * Factory for creating model adapters from configuration.
