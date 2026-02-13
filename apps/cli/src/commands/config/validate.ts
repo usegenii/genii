@@ -4,8 +4,8 @@
  */
 
 import { access } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDefaultBasePath } from '@genii/config/paths';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
@@ -45,7 +45,7 @@ export function validateCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'genii');
+			const basePath = getDefaultBasePath();
 			const results: Array<{ name: string; file: string; valid: boolean; error?: string; exists: boolean }> = [];
 			let hasErrors = false;
 

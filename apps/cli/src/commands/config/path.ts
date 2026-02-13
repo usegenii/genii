@@ -4,8 +4,8 @@
  */
 
 import { access } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDefaultBasePath } from '@genii/config/paths';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
@@ -44,7 +44,7 @@ export function pathCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'genii');
+			const basePath = getDefaultBasePath();
 
 			// Check which files exist
 			const files: Array<{ name: string; file: string; path: string; exists: boolean }> = [];

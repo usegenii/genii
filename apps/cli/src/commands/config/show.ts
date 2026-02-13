@@ -3,8 +3,6 @@
  * @module commands/config/show
  */
 
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
@@ -106,7 +104,8 @@ export function showCommand(config: Command): void {
 				// If daemon is not running, try to load config directly from files
 				if (error instanceof Error && error.message.includes('ECONNREFUSED')) {
 					try {
-						const basePath = join(homedir(), '.config', 'genii');
+						const { getDefaultBasePath } = await import('@genii/config/paths');
+						const basePath = getDefaultBasePath();
 						const section = options.section as ConfigSection | undefined;
 
 						// Dynamically import the config module

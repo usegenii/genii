@@ -51,33 +51,6 @@ export function isWindows(): boolean {
 }
 
 /**
- * Get the data directory for persistent storage.
- *
- * Uses platform-appropriate paths:
- * - Unix: ~/.local/share/genii or XDG_DATA_HOME
- * - macOS: ~/Library/Application Support/genii
- * - Windows: %APPDATA%/genii
- *
- * @returns The data directory path
- */
-export function getDataDirectory(): string {
-	const home = os.homedir();
-
-	if (process.platform === 'win32') {
-		const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
-		return path.join(appData, 'genii');
-	}
-
-	if (process.platform === 'darwin') {
-		return path.join(home, 'Library', 'Application Support', 'genii');
-	}
-
-	// Linux/Unix - use XDG_DATA_HOME or default
-	const dataHome = process.env.XDG_DATA_HOME ?? path.join(home, '.local', 'share');
-	return path.join(dataHome, 'genii');
-}
-
-/**
  * Get the log directory.
  *
  * Uses platform-appropriate paths:

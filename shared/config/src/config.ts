@@ -1,18 +1,12 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { type ChannelsLoadResult, loadChannelsConfig } from './loaders/channels.js';
 import { loadModelsConfig } from './loaders/models.js';
 import { loadPreferencesConfig } from './loaders/preferences.js';
 import { loadProvidersConfig } from './loaders/providers.js';
+import { getDefaultBasePath } from './paths.js';
 import type { ChannelConfig, ChannelsConfig } from './types/channel.js';
 import type { ModelConfig } from './types/model.js';
 import type { PreferencesConfig } from './types/preferences.js';
 import type { ProviderConfig } from './types/provider.js';
-
-/**
- * Default base path for configuration files
- */
-const DEFAULT_BASE_PATH = join(homedir(), '.config', 'genii');
 
 /**
  * Options for loading configuration
@@ -124,7 +118,7 @@ export function createConfig(
  * const config = await loadConfig({ basePath: '/custom/path' });
  */
 export async function loadConfig(options: ConfigOptions = {}): Promise<Config> {
-	const basePath = options.basePath ?? DEFAULT_BASE_PATH;
+	const basePath = options.basePath ?? getDefaultBasePath();
 
 	// Load all configuration files in parallel
 	const [providers, models, channelsData, preferences] = await Promise.all([

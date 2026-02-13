@@ -7,10 +7,10 @@
  * - Dependency injection setup
  */
 
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { Config } from '@genii/config/config';
+import { getDefaultBasePath } from '@genii/config/paths';
 import { DEFAULT_PULSE_SCHEDULE } from '@genii/config/types/preferences';
 import type { ModelFactory } from '@genii/models/factory';
 import { DateTimeContextInjector } from '@genii/orchestrator/context-injectors/datetime/injector';
@@ -91,21 +91,6 @@ function getDefaultSocketPath(): string {
 		return '\\\\.\\pipe\\genii-daemon';
 	}
 	return '/tmp/genii-daemon.sock';
-}
-
-/**
- * Get the default data path for the current platform.
- */
-function getDefaultDataPath(): string {
-	const home = homedir();
-	if (process.platform === 'darwin') {
-		return join(home, 'Library', 'Application Support', 'genii');
-	}
-	if (process.platform === 'win32') {
-		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'genii');
-	}
-	// Linux/Unix - use XDG_DATA_HOME or fallback
-	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'genii');
 }
 
 /**
@@ -219,7 +204,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 export async function createDaemon(options: CreateDaemonOptions = {}): Promise<Daemon> {
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
-	const dataPath = options.dataPath ?? getDefaultDataPath();
+	const dataPath = options.dataPath ?? getDefaultBasePath();
 	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {
@@ -435,7 +420,7 @@ export interface CreateDaemonWithDepsOptions extends CreateDaemonOptions {
 export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions = {}): Promise<Daemon> {
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
-	const dataPath = options.dataPath ?? getDefaultDataPath();
+	const dataPath = options.dataPath ?? getDefaultBasePath();
 	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {

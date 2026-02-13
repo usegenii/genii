@@ -16,10 +16,9 @@
  * ```
  */
 
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { loadConfig } from '@genii/config/config';
+import { getDefaultBasePath } from '@genii/config/paths';
 import { createSecretStore } from '@genii/config/secrets/composite';
 import { createModelFactory } from '@genii/models/factory';
 import { initializeChannels } from './channels/init';
@@ -29,21 +28,6 @@ import { createLogger, type LogLevel } from './logging/logger';
 
 /** Interval for second SIGINT detection (hard shutdown) */
 const HARD_SHUTDOWN_INTERVAL_MS = 3000;
-
-/**
- * Get the default data path for the current platform.
- */
-function getDefaultDataPath(): string {
-	const home = homedir();
-	if (process.platform === 'darwin') {
-		return join(home, 'Library', 'Application Support', 'genii');
-	}
-	if (process.platform === 'win32') {
-		return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'genii');
-	}
-	// Linux/Unix - use XDG_DATA_HOME or fallback
-	return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'genii');
-}
 
 /**
  * Parsed command line arguments.
@@ -272,7 +256,7 @@ export async function main(): Promise<void> {
 	}
 
 	// Determine data path (use default if not specified)
-	const dataPath = args.dataPath ?? getDefaultDataPath();
+	const dataPath = args.dataPath ?? getDefaultBasePath();
 
 	const config = await loadConfig({ basePath: dataPath });
 	const logLevel = resolveDaemonLogLevel({ logLevel: args.logLevel, config });

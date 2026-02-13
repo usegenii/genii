@@ -5,8 +5,8 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDefaultBasePath } from '@genii/config/paths';
 import type { Command } from 'commander';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
 
@@ -101,7 +101,7 @@ export function editCommand(config: Command): void {
 			const format = getOutputFormat(globalOptions);
 			const formatter = getFormatter(format);
 
-			const basePath = join(homedir(), '.config', 'genii');
+			const basePath = getDefaultBasePath();
 
 			// Validate section if provided
 			if (section && !isValidSection(section)) {
