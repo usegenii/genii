@@ -34,7 +34,7 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
-	"packageManager": "pnpm@10.29.2",
+	"packageManager": "pnpm@10.29.3",
 	"dependencies": {
 		"marked": "17.0.1"
 	},
