@@ -24,6 +24,32 @@ import type { Logger } from '../logging/logger';
 import type { LastActiveTracker } from '../scheduler/last-active-tracker';
 import { agentEventToOutboundIntent, inboundEventToAgentInput } from './transforms';
 
+function getErrorContext(error: unknown): {
+	error: Error | Record<string, unknown>;
+	errorMessage: string;
+	errorStack?: string;
+} {
+	if (error instanceof Error) {
+		return {
+			error,
+			errorMessage: error.message,
+			errorStack: error.stack,
+		};
+	}
+
+	if (typeof error === 'object' && error !== null) {
+		return {
+			error: error as Record<string, unknown>,
+			errorMessage: JSON.stringify(error),
+		};
+	}
+
+	return {
+		error: { value: error },
+		errorMessage: String(error),
+	};
+}
+
 /**
  * Configuration for spawning new agents.
  */
@@ -146,7 +172,16 @@ export class MessageRouter implements MessageRouterInterface {
 		// Subscribe to channel registry events
 		const channelUnsubscribe = this._channelRegistry.subscribe((event, channelId) => {
 			this.handleInbound(event, channelId).catch((error) => {
-				this._logger.error({ error, channelId }, 'Error handling inbound event');
+				const errorContext = getErrorContext(error);
+				this._logger.error(
+					{
+						...errorContext,
+						channelId,
+						eventType: event.type,
+						origin: 'origin' in event ? event.origin : undefined,
+					},
+					'Error handling inbound event',
+				);
 			});
 		});
 		this._subscriptions.push(channelUnsubscribe);
