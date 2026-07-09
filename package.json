@@ -41,7 +41,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.4.16",
 		"tsup": "8.5.1",
-		"tsx": "4.22.5",
+		"tsx": "4.23.0",
 		"turbo": "2.10.3"
 	}
 }
