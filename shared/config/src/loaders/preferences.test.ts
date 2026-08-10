@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadPreferencesConfig } from './preferences.js';
 
-describe('loadPreferencesConfig - timezone preferences', () => {
+describe('loadPreferencesConfig', () => {
 	let tempDir: string;
 
 	beforeAll(async () => {

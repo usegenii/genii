@@ -135,6 +135,11 @@ All configuration files are stored in `~/.config/genii/` (Linux/macOS) or `%APPD
 | `preferences.toml` | User preferences |
 | `guidance/SOUL.md` | Default agent personality/instructions |
 
+#### Shell timeout
+
+`agents.tools.shell.default-timeout` is expressed in milliseconds and defaults to `30000` (30 seconds). Configured
+values are interpreted literally as milliseconds.
+
 ### Thinking Levels
 
 For Anthropic models, you can configure the thinking level:

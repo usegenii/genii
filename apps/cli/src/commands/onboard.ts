@@ -10,9 +10,10 @@
 import * as readline from 'node:readline';
 import { getProvider } from '@genii/config/providers/definitions';
 import { createSecretStore } from '@genii/config/secrets/composite';
+import { DEFAULT_SHELL_TIMEOUT_MS } from '@genii/config/types/preferences';
 import type { ModelConfigWrite } from '@genii/config/writers/models';
 import { saveModelsConfig } from '@genii/config/writers/models';
-import { savePreferencesConfig } from '@genii/config/writers/preferences';
+import { type PreferencesConfigWrite, savePreferencesConfig } from '@genii/config/writers/preferences';
 import { saveProvidersConfig } from '@genii/config/writers/providers';
 import type { Command } from 'commander';
 import { render } from 'ink';
@@ -41,6 +42,21 @@ function intervalToCron(interval: string): string {
 		default:
 			return '0 * * * *';
 	}
+}
+
+/**
+ * Build the preferences persisted by non-interactive onboarding.
+ */
+export function buildNonInteractivePreferences(
+	providerId: string,
+	modelIds: readonly string[],
+	logLevel: PreferencesConfigWrite['logLevel'] = 'info',
+): PreferencesConfigWrite {
+	return {
+		logLevel,
+		shellTimeout: DEFAULT_SHELL_TIMEOUT_MS,
+		defaultModels: modelIds.map((id) => `${providerId}/${id}`),
+	};
 }
 
 /**
@@ -161,11 +177,14 @@ export function registerOnboardCommand(program: Command): void {
 					formatter.message(`Models configured: ${modelIds.join(', ')}`, 'success');
 
 					// Write preferences config (defaultModels only written if none exist)
-					await savePreferencesConfig(configPath, {
-						logLevel: (options.logLevel as 'debug' | 'info' | 'warn' | 'error') ?? 'info',
-						shellTimeout: 30,
-						defaultModels: modelIds.map((id: string) => `${options.provider}/${id}`),
-					});
+					await savePreferencesConfig(
+						configPath,
+						buildNonInteractivePreferences(
+							options.provider as string,
+							modelIds,
+							options.logLevel as PreferencesConfigWrite['logLevel'],
+						),
+					);
 					formatter.message('Preferences configured', 'success');
 
 					// Handle Pulse config if enabled
