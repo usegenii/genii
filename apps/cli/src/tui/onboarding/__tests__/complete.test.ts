@@ -43,6 +43,18 @@ import { savePreferencesConfig } from '@genii/config/writers/preferences';
 const mockSavePreferencesConfig = vi.mocked(savePreferencesConfig);
 
 describe('completeOnboarding', () => {
+	it('should persist the default shell timeout in milliseconds', async () => {
+		const result = await completeOnboarding(DEFAULT_STATE, '/tmp/fake/guidance');
+		expect(result.success).toBe(true);
+
+		expect(mockSavePreferencesConfig).toHaveBeenCalledWith(
+			'/tmp/fake',
+			expect.objectContaining({
+				shellTimeout: 30_000,
+			}),
+		);
+	});
+
 	it('should prefix defaultModels with provider ID', async () => {
 		const state: OnboardingState = {
 			...DEFAULT_STATE,

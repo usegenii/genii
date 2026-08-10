@@ -14,6 +14,7 @@ import { writeTomlFile } from './toml.js';
  */
 export interface PreferencesConfigWrite {
 	logLevel?: 'debug' | 'info' | 'warn' | 'error';
+	/** Shell command timeout in milliseconds. */
 	shellTimeout?: number;
 	timezone?: string;
 	defaultModels?: string[];

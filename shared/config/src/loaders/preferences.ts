@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { PreferencesConfig } from '../types/preferences.js';
+import { DEFAULT_SHELL_TIMEOUT_MS, type PreferencesConfig } from '../types/preferences.js';
 import { readTomlFileOptional } from './toml.js';
 
 const PREFERENCES_FILENAME = 'preferences.toml';
@@ -10,7 +10,7 @@ const DEFAULT_PREFERENCES: PreferencesConfig = {
 		tools: {
 			shell: {
 				defaultWorkingDir: undefined,
-				defaultTimeout: 30_000,
+				defaultTimeout: DEFAULT_SHELL_TIMEOUT_MS,
 				maxOutputLength: 50_000,
 			},
 		},

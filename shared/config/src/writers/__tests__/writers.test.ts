@@ -60,14 +60,14 @@ describe('Config Writers', () => {
 		it('should save preferences to preferences.toml', async () => {
 			await savePreferencesConfig(testDir, {
 				logLevel: 'info',
-				shellTimeout: 30,
+				shellTimeout: 30_000,
 			});
 
 			const content = await readFile(join(testDir, 'preferences.toml'), 'utf-8');
 			expect(content).toContain('[logging]');
 			expect(content).toContain('level = "info"');
 			expect(content).toContain('[agents.tools.shell]');
-			expect(content).toContain('default-timeout = 30');
+			expect(content).toContain('default-timeout = 30000');
 		});
 	});
 

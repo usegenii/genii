@@ -1,8 +1,12 @@
 import { type Static, Type } from '@sinclair/typebox';
 
+export const DEFAULT_SHELL_TIMEOUT_MS = 30_000;
+
 export const ShellToolPreferencesSchema = Type.Object({
 	defaultWorkingDir: Type.Optional(Type.String({ description: 'Default working directory for shell commands' })),
-	defaultTimeout: Type.Optional(Type.Number({ description: 'Default timeout in ms', default: 30000 })),
+	defaultTimeout: Type.Optional(
+		Type.Number({ description: 'Default timeout in milliseconds', default: DEFAULT_SHELL_TIMEOUT_MS }),
+	),
 	maxOutputLength: Type.Optional(Type.Number({ description: 'Maximum output length in characters', default: 50000 })),
 });
 

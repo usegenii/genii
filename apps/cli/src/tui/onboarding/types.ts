@@ -5,6 +5,7 @@
 
 import type { ChannelConfig } from '@genii/config/types/channel';
 import type { ModelConfig } from '@genii/config/types/model';
+import { DEFAULT_SHELL_TIMEOUT_MS } from '@genii/config/types/preferences';
 import type { ProviderConfig } from '@genii/config/types/provider';
 
 /**
@@ -107,6 +108,7 @@ export interface ProviderInstanceState {
  */
 export interface PreferencesState {
 	logLevel: 'debug' | 'info' | 'warn' | 'error';
+	/** Shell command timeout in milliseconds. */
 	shellTimeout: number;
 	timezone?: string;
 }
@@ -190,7 +192,7 @@ export const DEFAULT_STATE: OnboardingState = {
 	providersToRemove: [],
 	preferences: {
 		logLevel: 'info',
-		shellTimeout: 30,
+		shellTimeout: DEFAULT_SHELL_TIMEOUT_MS,
 	},
 	pulse: {
 		enabled: true,
