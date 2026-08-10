@@ -288,7 +288,7 @@ async function handleAgentSpawn(
 	params: RpcMethods['agent.spawn'],
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['agent.spawn']> {
-	const { coordinator, modelFactory, appConfig, logger } = context;
+	const { coordinator, modelFactory, appConfig, toolRegistry, logger } = context;
 
 	if (!modelFactory) {
 		throw new Error('Model factory not configured - cannot spawn agents');
@@ -318,6 +318,7 @@ async function handleAgentSpawn(
 		task: params.task,
 		input: params.input,
 		tags: params.tags,
+		tools: toolRegistry,
 	});
 	handle.start();
 
