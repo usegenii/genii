@@ -445,7 +445,7 @@ class SocketDaemonClient implements DaemonClient {
 	private _nextRequestId = 1;
 
 	constructor(options: DaemonClientOptions = {}) {
-		this._socketPath = options.socketPath ?? getDefaultSocketPath();
+		this._socketPath = options.socketPath ?? getSocketPath();
 		this._connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_OPTIONS.connectTimeoutMs;
 		this._requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_OPTIONS.requestTimeoutMs;
 	}
