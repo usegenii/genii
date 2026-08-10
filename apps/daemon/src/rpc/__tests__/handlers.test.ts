@@ -170,6 +170,71 @@ function getHandler(
 }
 
 describe('RPC Handlers', () => {
+	describe('handleAgentSpawn', () => {
+		it('should pass the exact toolRegistry from context to coordinator.spawn()', async () => {
+			const mockToolRegistry = createMockToolRegistry();
+			const mockCoordinator = createMockCoordinator();
+			const mockHandle = createMockAgentHandle('spawned-session');
+
+			vi.mocked(mockCoordinator.spawn).mockResolvedValue(mockHandle);
+
+			const context = createMockContext({
+				coordinator: mockCoordinator,
+				toolRegistry: mockToolRegistry,
+			});
+			const handlers = createHandlers(context);
+			const agentSpawnHandler = getHandler(handlers, 'agent.spawn');
+
+			const params = {
+				model: 'test/mock-model',
+				guidancePath: '/test/guidance',
+				task: 'test-task',
+				input: { message: 'Start the task' },
+				tags: ['rpc'],
+			};
+
+			const result = await agentSpawnHandler(params, context);
+
+			expect(mockCoordinator.spawn).toHaveBeenCalledWith(expect.any(Object), {
+				guidancePath: '/test/guidance',
+				task: 'test-task',
+				input: { message: 'Start the task' },
+				tags: ['rpc'],
+				tools: mockToolRegistry,
+			});
+			const spawnConfig = vi.mocked(mockCoordinator.spawn).mock.calls[0]?.[1];
+			expect(spawnConfig?.tools).toBe(mockToolRegistry);
+			expect(mockHandle.start).toHaveBeenCalledOnce();
+			expect(result).toEqual({ id: 'spawned-session' });
+		});
+
+		it('should still spawn with undefined tools when toolRegistry is not in context', async () => {
+			const mockCoordinator = createMockCoordinator();
+			const mockHandle = createMockAgentHandle('spawned-without-tools');
+
+			vi.mocked(mockCoordinator.spawn).mockResolvedValue(mockHandle);
+
+			const context = createMockContext({
+				coordinator: mockCoordinator,
+				toolRegistry: undefined,
+			});
+			const handlers = createHandlers(context);
+			const agentSpawnHandler = getHandler(handlers, 'agent.spawn');
+
+			const result = await agentSpawnHandler({ model: 'test/mock-model' }, context);
+
+			expect(mockCoordinator.spawn).toHaveBeenCalledWith(expect.any(Object), {
+				guidancePath: undefined,
+				task: undefined,
+				input: undefined,
+				tags: undefined,
+				tools: undefined,
+			});
+			expect(mockHandle.start).toHaveBeenCalledOnce();
+			expect(result).toEqual({ id: 'spawned-without-tools' });
+		});
+	});
+
 	describe('handleAgentContinue', () => {
 		it('should pass toolRegistry from context to coordinator.continue()', async () => {
 			const mockToolRegistry = createMockToolRegistry();
