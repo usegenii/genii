@@ -24,7 +24,7 @@ interface ClientProbeInput {
 }
 
 const execFileAsync = promisify(execFile);
-const clientProbePath = fileURLToPath(new URL('./__fixtures__/client-probe.ts', import.meta.url));
+const clientProbePath = fileURLToPath(new URL('../test-harness/client-probe.ts', import.meta.url));
 const tsxImportUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 let nextPipeId = 1;
 

@@ -1,4 +1,4 @@
-import { createDaemonClient, getSocketPath } from '../client';
+import { createDaemonClient, getSocketPath } from '../src/client';
 
 interface ClientProbeInput {
 	mode: 'ping' | 'resolve';

@@ -1,6 +1,6 @@
 {
 	// Visit https://aka.ms/tsconfig to read more about this file
-	"include": ["src", "bin"],
+	"include": ["src", "bin", "test-harness"],
 	"exclude": ["node_modules", "dist", "*.config.ts"],
 	"compilerOptions": {
 		// File Layout
