@@ -7,6 +7,7 @@
  * - Recovery from corrupted or missing state
  */
 
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AgentSessionId } from '@genii/orchestrator/types/core';
@@ -66,6 +67,7 @@ function deserializeBinding(serialized: SerializedConversationBinding): Conversa
 class FileConversationStore implements ConversationStore {
 	private readonly _filePath: string;
 	private readonly _logger: Logger;
+	private _saveQueue: Promise<void> = Promise.resolve();
 
 	constructor(filePath: string, logger: Logger) {
 		this._filePath = filePath;
@@ -96,16 +98,21 @@ class FileConversationStore implements ConversationStore {
 		}
 	}
 
-	async save(bindings: ConversationBinding[]): Promise<void> {
+	save(bindings: ConversationBinding[]): Promise<void> {
 		const serialized = bindings.map(serializeBinding);
 		const content = JSON.stringify(serialized, null, '\t');
+		const write = this._saveQueue.then(() => this.writeSnapshot(content, bindings.length));
+		this._saveQueue = write.catch(() => undefined);
+		return write;
+	}
 
+	private async writeSnapshot(content: string, count: number): Promise<void> {
 		// Ensure directory exists
 		const dir = dirname(this._filePath);
 		await mkdir(dir, { recursive: true });
 
 		// Write to temp file first
-		const tempPath = `${this._filePath}.tmp.${Date.now()}`;
+		const tempPath = `${this._filePath}.tmp.${process.pid}.${randomUUID()}`;
 
 		try {
 			await writeFile(tempPath, content, 'utf-8');
@@ -113,7 +120,7 @@ class FileConversationStore implements ConversationStore {
 			// Atomic rename
 			await rename(tempPath, this._filePath);
 
-			this._logger.debug({ count: bindings.length }, 'Saved bindings to store');
+			this._logger.debug({ count }, 'Saved bindings to store');
 		} catch (error) {
 			// Clean up temp file on error
 			try {

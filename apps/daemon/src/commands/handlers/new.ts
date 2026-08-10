@@ -36,7 +36,7 @@ export const newCommand: SlashCommand = {
 		}
 
 		// Unbind the destination
-		services.conversations.unbind(destination);
+		await services.conversations.unbind(destination);
 
 		logger.info({ destination: `${destination.channelId}:${destination.ref}` }, 'Conversation reset via /new');
 

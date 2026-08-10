@@ -16,6 +16,7 @@ import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { AgentEvent, CoordinatorEvent } from '@genii/orchestrator/events/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
+import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@genii/orchestrator/types/core';
 import type { CommandExecutorInterface } from '../commands/executor';
@@ -67,7 +68,10 @@ export interface AgentSpawnContext {
  * Returns a Promise since adapter creation may require async operations
  * like resolving secrets from a secret store.
  */
-export type AgentAdapterFactory = (agentId: AgentSessionId) => Promise<AgentAdapter>;
+export type AgentAdapterFactory = (agentId?: AgentSessionId, checkpoint?: AgentCheckpoint) => Promise<AgentAdapter>;
+
+const WAITING_RESPONSE =
+	'This conversation is waiting for a pending tool request. Resolve or cancel that request before sending another message.';
 
 /**
  * Configuration for the MessageRouter.
@@ -391,7 +395,7 @@ export class MessageRouter implements MessageRouterInterface {
 		// If no agent is bound, spawn a new one with the initial input
 		if (binding.agentId === null) {
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
 				{ agentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned and bound new agent',
@@ -410,12 +414,18 @@ export class MessageRouter implements MessageRouterInterface {
 			return;
 		}
 
+		if (agentHandle.status === 'waiting' || agentHandle.getPendingRequests().length > 0) {
+			this._logger.info({ agentId }, 'Rejecting ordinary input while agent is waiting');
+			await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+			return;
+		}
+
 		// If agent is completed, continue from checkpoint to restore message history
 		if (agentHandle.status === 'completed') {
 			const adapter = this._coordinator.getAdapter(agentId);
 			if (adapter === undefined) {
 				this._logger.error({ agentId }, 'No adapter found for completed agent, cannot continue');
-				this._conversationManager.unbind(destination);
+				await this._conversationManager.unbind(destination);
 				return;
 			}
 
@@ -432,7 +442,7 @@ export class MessageRouter implements MessageRouterInterface {
 			} catch (error) {
 				this._logger.error({ error, agentId }, 'Error continuing conversation from checkpoint');
 				// Unbind on error so next message will spawn fresh agent
-				this._conversationManager.unbind(destination);
+				await this._conversationManager.unbind(destination);
 			}
 			return;
 		}
@@ -500,9 +510,9 @@ export class MessageRouter implements MessageRouterInterface {
 		if (checkpoint === null) {
 			this._logger.info({ agentId }, 'No checkpoint found for agent after restart, spawning new agent');
 			// No checkpoint - unbind and spawn a fresh agent
-			this._conversationManager.unbind(destination);
+			await this._conversationManager.unbind(destination);
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
 				{ newAgentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned new agent to replace missing one',
@@ -511,9 +521,19 @@ export class MessageRouter implements MessageRouterInterface {
 			return;
 		}
 
+		const pendingRequests = await this._coordinator.getPendingRequests(agentId);
+		if (pendingRequests.length > 0) {
+			this._logger.info(
+				{ agentId, pendingCount: pendingRequests.length },
+				'Rejecting ordinary input for dormant waiting session',
+			);
+			await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+			return;
+		}
+
 		// Create a new adapter for the restored agent
 		try {
-			const adapter = await this._adapterFactory(agentId);
+			const adapter = await this._adapterFactory(agentId, checkpoint);
 			const newHandle = await this._coordinator.continue(agentId, input, adapter, {
 				tools: this._toolRegistry,
 			});
@@ -525,9 +545,9 @@ export class MessageRouter implements MessageRouterInterface {
 		} catch (error) {
 			this._logger.error({ error, agentId }, 'Failed to restore from checkpoint, spawning new agent');
 			// Failed to restore - unbind and spawn fresh
-			this._conversationManager.unbind(destination);
+			await this._conversationManager.unbind(destination);
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			handle.start();
 		}
 	}

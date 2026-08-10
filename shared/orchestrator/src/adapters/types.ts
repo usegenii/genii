@@ -63,7 +63,15 @@ export interface AdapterCreateConfig {
 	contextInjection?: ContextInjection | undefined;
 	/** Logger for diagnostic output */
 	logger?: Logger | undefined;
+	/**
+	 * Awaited durability barrier for adapter-owned lifecycle transitions.
+	 * Waiting and resolution events are not exposed until this succeeds.
+	 */
+	onCheckpoint?: ((checkpoint: InstanceCheckpoint, reason: AdapterCheckpointReason) => Promise<void>) | undefined;
 }
+
+/** Adapter transitions which require a durable checkpoint barrier. */
+export type AdapterCheckpointReason = 'suspended' | 'resolution_accepted' | 'tool_completed';
 
 /**
  * Status of an agent instance.
@@ -121,5 +129,5 @@ export interface AgentInstance {
 	/**
 	 * Resolve pending suspension requests.
 	 */
-	resolve(resolutions: PendingResolution[]): void;
+	resolve(resolutions: PendingResolution[]): Promise<void>;
 }

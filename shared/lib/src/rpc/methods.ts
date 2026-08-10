@@ -120,12 +120,25 @@ export type RpcSuspensionRequest =
 	| { type: 'sleep'; durationMs: number; wakeAt: number };
 
 export interface RpcPendingRequestInfo {
+	suspensionId: string;
 	toolCallId: string;
 	toolName: string;
+	stepId: string;
 	type: 'user_input' | 'approval' | 'event' | 'sleep';
 	request: RpcSuspensionRequest;
 	suspendedAt: number;
+	deadline?: number;
+	status: 'waiting' | 'resolved';
 }
+
+/** JSON-safe resolution targeting one exact durable suspension. */
+export type RpcPendingResolution =
+	| { suspensionId: string; type: 'user_input'; value: RpcJsonValue }
+	| { suspensionId: string; type: 'approval'; approved: boolean; reason?: string }
+	| { suspensionId: string; type: 'event'; payload: RpcJsonValue }
+	| { suspensionId: string; type: 'sleep' }
+	| { suspensionId: string; type: 'cancel'; reason?: string }
+	| { suspensionId: string; type: 'timeout' };
 
 /** JSON-safe representation of an orchestrator agent event on the RPC wire. */
 export type RpcAgentEvent =
@@ -192,6 +205,8 @@ export type RpcMethodName =
 	| 'agent.send'
 	| 'agent.snapshot'
 	| 'agent.listCheckpoints'
+	| 'agent.pendingRequests'
+	| 'agent.resolveSuspensions'
 	| 'channel.list'
 	| 'channel.get'
 	| 'channel.connect'
@@ -231,6 +246,8 @@ export interface RpcMethods {
 	'agent.snapshot': { id: AgentSessionId };
 	'agent.continue': { sessionId: AgentSessionId; input: AgentInput; model?: string };
 	'agent.listCheckpoints': Record<string, never>;
+	'agent.pendingRequests': { sessionId: AgentSessionId };
+	'agent.resolveSuspensions': { sessionId: AgentSessionId; resolutions: RpcPendingResolution[] };
 	'channel.list': Record<string, never>;
 	'channel.get': { id: ChannelId };
 	'channel.connect': { type: string; config: Record<string, unknown> };
@@ -273,6 +290,8 @@ export interface RpcMethodResults {
 	'agent.snapshot': AgentSnapshot;
 	'agent.continue': { id: AgentSessionId };
 	'agent.listCheckpoints': AgentSessionId[];
+	'agent.pendingRequests': RpcPendingRequestInfo[];
+	'agent.resolveSuspensions': { id: AgentSessionId };
 	'channel.list': ChannelSummary[];
 	'channel.get': ChannelDetails | null;
 	'channel.connect': { ok: true };

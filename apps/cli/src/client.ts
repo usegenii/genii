@@ -5,7 +5,7 @@
  */
 
 import type * as net from 'node:net';
-import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import type { RpcMethodResults, RpcMethods, RpcPendingRequestInfo, RpcPendingResolution } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 
 // =============================================================================
@@ -85,6 +85,15 @@ export interface SpawnAgentOptions {
 	/** Initial instruction/message to send to the agent */
 	instruction?: string;
 }
+
+/** Stable identifier for one exact durable tool suspension on the RPC wire. */
+export type SuspensionId = RpcPendingRequestInfo['suspensionId'];
+
+/** A JSON-safe resolution for one exact suspension. */
+export type PendingResolution = RpcPendingResolution;
+
+/** Durable suspension returned by the daemon without restoring the model. */
+export type PendingRequestInfo = RpcPendingRequestInfo;
 
 /**
  * Channel summary for listing.
@@ -347,6 +356,8 @@ export interface DaemonClient {
 	spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }>;
 	continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }>;
 	listCheckpoints(): Promise<string[]>;
+	getPendingRequests(sessionId: string): Promise<PendingRequestInfo[]>;
+	resolveSuspensions(sessionId: string, resolutions: PendingResolution[]): Promise<{ id: string }>;
 	terminateAgent(id: string, reason?: string): Promise<void>;
 	pauseAgent(id: string): Promise<void>;
 	resumeAgent(id: string): Promise<void>;
@@ -610,6 +621,14 @@ class SocketDaemonClient implements DaemonClient {
 
 	async listCheckpoints(): Promise<string[]> {
 		return this._request('agent.listCheckpoints', {});
+	}
+
+	async getPendingRequests(sessionId: string): Promise<PendingRequestInfo[]> {
+		return this._request('agent.pendingRequests', { sessionId });
+	}
+
+	async resolveSuspensions(sessionId: string, resolutions: PendingResolution[]): Promise<{ id: string }> {
+		return this._request('agent.resolveSuspensions', { sessionId, resolutions });
 	}
 
 	async terminateAgent(id: string, reason?: string): Promise<void> {

@@ -55,7 +55,7 @@ connection's subscriptions. The journals are operational buffers rather than dur
 | **Agent session** | The stable execution identity and history for reactive or proactive work. A conversation may bind one; a session may finish a turn and later resume. |
 | **Guidance** | Owner-authored context defining identity, behavior, task recipes, skills, time context, and proactive-work policy. |
 | **Memory** | Owner- and agent-maintained learned or working context that is retained across otherwise independent sessions. |
-| **Checkpoint** | A provider-neutral record of completed-turn history and session metadata used to continue a later turn. It does not rehydrate in-flight tool execution. |
+| **Checkpoint** | A versioned, provider-neutral record of session history and metadata. It also records an active durable tool wait, its completed steps, and any accepted resolution so the exact invocation can replay after restart. |
 | **Pulse** | An optional scheduled session for proactive work. It shares normal guidance and capabilities but is independent of any reactive conversation session. |
 
 The current external messaging integration is Telegram. The channel contract is intentionally platform-neutral so
@@ -70,7 +70,8 @@ additional integrations can preserve the same routing and session semantics.
 2. The daemon handles in-channel commands directly or converts conversational events into agent input.
 3. The destination's conversation binding selects a session.
 4. If no session is bound, Genii creates and binds one before execution starts. A live session receives follow-up
-   input directly. A completed or post-restart session resumes from its checkpoint.
+   input directly. A completed or post-restart session resumes from its checkpoint. Ordinary input is rejected with
+   an explicit response while the bound session has a durable tool wait.
 5. The agent combines its history, current guidance, selected model, and available tools to execute the turn.
 6. Status, tool activity, streamed output, final responses, and errors become semantic outbound intents. The channel
    decides how those intents appear on its platform.
@@ -92,19 +93,27 @@ sent.
 Continuity is split into layers with different responsibilities:
 
 - **Conversation bindings** preserve where replies belong and which session should handle the next message.
-- **Session checkpoints** preserve completed-turn history and session metadata across later turns and daemon restarts;
-  they do not resume in-flight work.
+- **Session checkpoints** preserve completed-turn history and session metadata across later turns and daemon restarts.
+  At a durable tool wait, they additionally preserve the exact tool call, input, completed steps, request, deadline,
+  and accepted resolution so the invocation can replay without a synthetic user turn.
 - **Guidance** preserves the owner-authored identity, policies, and reusable capabilities applied to sessions.
 - **Memory** preserves learned context and working state across otherwise independent sessions.
 
 Recovery is lazy. On startup, Genii restores persisted routing state but does not eagerly resume every prior session.
-When new input arrives, the daemon resumes the bound session from its checkpoint; if no usable checkpoint exists, it
+New input resumes a completed bound session from its checkpoint. A dormant wait remains dormant until the control
+plane inspects or resolves it; inspection does not instantiate the model. If no usable checkpoint exists, the daemon
 starts a fresh session and repairs the binding.
 
-Durability is completion-oriented rather than transactional. Checkpoints are recorded after turns complete, while
-some routing state is finalized during orderly shutdown. In-flight work or recent bindings may be lost after an
-abrupt process failure. These stores favor inspectable, local state over distributed coordination or high
-availability.
+Completed turns are checkpointed, and durable-wait transitions add stricter barriers: the wait is persisted before it
+is published, an accepted resolution is persisted before it is acknowledged, and the real tool result is persisted
+before model execution continues. Checkpoint files and conversation bindings use atomic replacement, and binding
+changes are persisted when they occur. Other in-flight model or tool work is not transactional and may be lost after
+an abrupt process failure. Delivery and arbitrary post-resume side effects remain at-least-once rather than
+exactly-once. These stores favor inspectable, local state over distributed coordination or high availability.
+
+Durable waits are resolved explicitly through the control plane. One tool invocation may be suspended per session;
+sequential waits in that invocation are supported. See [Durable suspensions](docs/durable-suspensions.md) for the tool
+and RPC contracts.
 
 Configuration is also local and owner-managed. Logical model names separate session policy from provider-specific
 identifiers, and secret references keep credentials out of ordinary configuration. Native credential storage is
@@ -147,7 +156,8 @@ Checkpoints, memories, routing metadata, and logs may contain sensitive conversa
 protected as user data. Credentials receive separate handling, but the broader data directory is not an encrypted
 vault.
 
-Startup restores state before accepting control or channel traffic. Shutdown stops new work first, then scheduling and
-channel ingress, drains active sessions within a limit, and persists remaining routing state. Failures are surfaced
-through structured logs and lightweight health/status data. Message delivery remains best-effort: there is no durable
-outbound queue or end-to-end exactly-once guarantee.
+Startup restores routing state before accepting control or channel traffic while leaving suspended models dormant.
+Shutdown stops new work first, then scheduling and channel ingress, flushes and detaches waiting sessions immediately,
+and drains other active sessions within a limit. Failures are surfaced through structured logs and lightweight
+health/status data. Message delivery remains best-effort: there is no durable outbound queue or end-to-end exactly-once
+guarantee.

@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createStepContext, StepContextImpl } from '../step-context';
-import { DuplicateStepError, SuspensionError } from '../suspension';
+import { DuplicateStepError, SuspensionCancelledError, SuspensionError, SuspensionTimeoutError } from '../suspension';
 import type { StepContextEvent } from '../types';
 
 describe('StepContext', () => {
@@ -36,6 +36,7 @@ describe('StepContext', () => {
 			const result = await context.run('step1', fn);
 			expect(result).toBe('memoized');
 			expect(fn).not.toHaveBeenCalled();
+			expect(context.getCompletedSteps()[0]?.completedAt).toBe(completedSteps[0]?.completedAt);
 		});
 
 		it('should throw DuplicateStepError for duplicate step IDs in same run', async () => {
@@ -74,11 +75,42 @@ describe('StepContext', () => {
 
 		it('should use resume data for suspended steps', async () => {
 			const context = createStepContext({
-				resumeData: { stepId: 'step1', result: 'resumed' },
+				resumeData: { stepId: 'step1', outcome: { type: 'value', value: 'resumed' } },
 			});
 
 			const result = await context.run('step1', async () => 'should not be called');
 			expect(result).toBe('resumed');
+		});
+
+		it.each([
+			['false', false],
+			['null', null],
+		] as const)('preserves a %s resume value', async (_label, value) => {
+			const context = createStepContext({
+				resumeData: { stepId: 'step1', outcome: { type: 'value', value } },
+			});
+
+			await expect(context.run('step1', async () => 'unused')).resolves.toBe(value);
+		});
+
+		it('preserves a void resume value', async () => {
+			const context = createStepContext({
+				resumeData: { stepId: 'step1', outcome: { type: 'void' } },
+			});
+
+			await expect(context.run('step1', async () => 'unused')).resolves.toBeUndefined();
+		});
+
+		it('normalizes cancellation and timeout as typed errors', async () => {
+			const cancelled = createStepContext({
+				resumeData: { stepId: 'step1', outcome: { type: 'cancelled', reason: 'no longer needed' } },
+			});
+			const timedOut = createStepContext({
+				resumeData: { stepId: 'step1', outcome: { type: 'timeout' } },
+			});
+
+			await expect(cancelled.run('step1', async () => 'unused')).rejects.toThrow(SuspensionCancelledError);
+			await expect(timedOut.run('step1', async () => 'unused')).rejects.toThrow(SuspensionTimeoutError);
 		});
 	});
 
@@ -104,6 +136,7 @@ describe('StepContext', () => {
 			const suspendedEvent = events.find((e) => e.type === 'suspended');
 			expect(suspendedEvent).toBeDefined();
 			expect(suspendedEvent?.type === 'suspended' && suspendedEvent.request.type).toBe('user_input');
+			expect(suspendedEvent?.type === 'suspended' && suspendedEvent.stepId).toBe('__suspension:user_input:0');
 		});
 	});
 

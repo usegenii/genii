@@ -104,13 +104,17 @@ function toRpcSuspensionRequest(request: SuspensionRequestData): RpcSuspensionRe
 	}
 }
 
-function toRpcPendingRequest(request: PendingRequestInfo): RpcPendingRequestInfo {
+export function toRpcPendingRequestInfo(request: PendingRequestInfo): RpcPendingRequestInfo {
 	return {
+		suspensionId: request.suspensionId,
 		toolCallId: request.toolCallId,
 		toolName: request.toolName,
+		stepId: request.stepId,
 		type: request.type,
 		request: toRpcSuspensionRequest(request.request),
 		suspendedAt: request.suspendedAt,
+		...(request.deadline !== undefined ? { deadline: request.deadline } : {}),
+		status: request.status,
 	};
 }
 
@@ -160,7 +164,7 @@ function toRpcAgentEvent(event: AgentEvent): RpcAgentEvent {
 		case 'suspended':
 			return {
 				type: event.type,
-				pendingRequests: event.pendingRequests.map(toRpcPendingRequest),
+				pendingRequests: event.pendingRequests.map(toRpcPendingRequestInfo),
 				timestamp: event.timestamp,
 			};
 		case 'memory_updated':

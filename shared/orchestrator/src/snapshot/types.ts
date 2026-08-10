@@ -6,6 +6,9 @@ import type { GuidanceCheckpoint, MemoryWrite } from '../guidance/types';
 import type { ToolExecutionState } from '../tools/types';
 import type { AgentSessionId, PartialAgentMetrics } from '../types/core';
 
+/** Current persisted checkpoint schema. */
+export const CHECKPOINT_VERSION = 1 as const;
+
 // Re-export for convenience
 export type { GuidanceCheckpoint, MemoryWrite, ToolExecutionState };
 
@@ -58,6 +61,8 @@ export interface CheckpointAdapterConfig extends InstanceAdapterConfig {
  * Does not include provider/model in adapterConfig - these are injected by the coordinator.
  */
 export interface InstanceCheckpoint {
+	/** Schema version. Unversioned checkpoints are accepted as legacy data. */
+	version?: typeof CHECKPOINT_VERSION;
 	/** When the checkpoint was taken */
 	timestamp: number;
 	/** Name of the adapter that created this agent */

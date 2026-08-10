@@ -5,6 +5,8 @@ An autonomous AI agent platform that runs in the background, maintaining persist
 ## Features
 
 - **Persistent Agents**: AI agents that maintain conversation history and context across sessions
+- **Durable Tool Waits**: Restart-safe user input, approval, event, and sleep suspensions
+  ([documentation](docs/durable-suspensions.md))
 - **Multi-Channel Support**: Connect to Telegram, Discord, and other messaging platforms
 - **Configurable Models**: Support for Anthropic, OpenAI, and Google AI models
 - **Guidance System**: Customize agent personality and behavior through markdown files
