@@ -25,7 +25,7 @@ describe('Onboard Command Integration', () => {
 
 	beforeEach(async () => {
 		testDir = join(tmpdir(), `genii-onboard-test-${Date.now()}`);
-		await mkdir(testDir, { recursive: true });
+		await mkdir(testDir, { recursive: true, mode: 0o700 });
 	});
 
 	afterEach(async () => {

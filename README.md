@@ -58,7 +58,30 @@ On macOS, store your API key in the system keychain:
 security add-generic-password -s genii -a anthropic-api-key -w "sk-ant-your-key-here"
 ```
 
-On Linux, create a secrets file at `~/.config/genii/secrets.json`:
+On Linux, Genii prefers the system Secret Service through libsecret. If it is unavailable, such as on a headless
+host, Genii falls back to `<data-path>/secrets.json`, using the daemon's configured data path. The default data path is
+`$XDG_DATA_HOME/genii` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/genii`.
+
+On POSIX systems, Genii accepts the fallback only when the data path is a real directory, not a symbolic link, owned by
+the current user, and `secrets.json` is a real regular file, not a symbolic link, owned by the current user. Genii
+creates missing directories with mode `0700` and missing secret files with mode `0600`. Existing paths are
+validation-only: Genii never changes their mode or ownership, and accepts usable secure modes that are stricter subsets
+of `0700` for the directory or `0600` for the file. If an existing mode grants permissions outside those limits, or a path
+has an unsafe owner, type, or resolution, Genii fails closed with an actionable error instead of reading or writing
+credentials.
+
+Create the default fallback paths securely before adding the JSON. If the daemon uses a custom data path, assign that
+path to `GENII_DATA_DIR` instead. For an existing current-user-owned, non-symbolic-link store rejected only because of
+its mode, the `chmod` commands below are also the manual remediation:
+
+```bash
+GENII_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/genii"
+umask 077
+mkdir -p "$GENII_DATA_DIR"
+chmod 700 "$GENII_DATA_DIR"
+touch "$GENII_DATA_DIR/secrets.json"
+chmod 600 "$GENII_DATA_DIR/secrets.json"
+```
 
 ```json
 {
