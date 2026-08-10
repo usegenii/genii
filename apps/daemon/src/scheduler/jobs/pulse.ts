@@ -150,7 +150,7 @@ export class PulseJob implements ScheduledJob {
 			}
 
 			// Route the response if we have a destination and content
-			if (destination && response && response.trim()) {
+			if (destination && response?.trim()) {
 				await this._sendResponse(destination, response);
 				return {
 					success: true,
