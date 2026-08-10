@@ -37,7 +37,7 @@ import { createFileConversationStore } from './conversations/store';
 import { type Daemon, type DaemonConfig, DaemonImpl } from './daemon';
 import { createLogger, type Logger, type LogLevel } from './logging/logger';
 import { resolveDefaultModel } from './models/resolve';
-import { createMessageRouter, type MessageRouterConfig } from './router/router';
+import { type AgentAdapterFactory, createMessageRouter, type MessageRouterConfig } from './router/router';
 import { createHandlers, type DaemonRuntimeConfig } from './rpc/handlers';
 import { createRpcServer, type RpcServer } from './rpc/server';
 import { createSubscriptionManager } from './rpc/subscriptions';
@@ -291,7 +291,7 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 	const lastActiveTracker = createLastActiveTracker(lastActiveTrackerPath, logger);
 
 	// Create adapter factory for reuse
-	const adapterFactory = async () => {
+	const adapterFactory: AgentAdapterFactory = async (_agentId, checkpoint) => {
 		if (!options.modelFactory) {
 			throw new Error('ModelFactory not configured');
 		}
@@ -299,8 +299,19 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 			throw new Error('Config not provided - cannot resolve default model');
 		}
 
-		const model = resolveDefaultModel(options.config);
-		return options.modelFactory.createAdapter(model);
+		if (!checkpoint) {
+			return options.modelFactory.createAdapter(resolveDefaultModel(options.config));
+		}
+		const model = `${checkpoint.adapterConfig.provider}/${checkpoint.adapterConfig.model}`;
+		return options.modelFactory.createAdapter(model, {
+			thinkingLevel: checkpoint.adapterConfig.thinkingLevel as
+				| 'off'
+				| 'minimal'
+				| 'low'
+				| 'medium'
+				| 'high'
+				| undefined,
+		});
 	};
 
 	// Create message router with configured adapter factory
@@ -508,7 +519,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	const lastActiveTracker = createLastActiveTracker(lastActiveTrackerPath, logger);
 
 	// Create adapter factory for reuse
-	const adapterFactory = async () => {
+	const adapterFactory: AgentAdapterFactory = async (_agentId, checkpoint) => {
 		if (!options.modelFactory) {
 			throw new Error('ModelFactory not configured');
 		}
@@ -516,8 +527,19 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 			throw new Error('Config not provided - cannot resolve default model');
 		}
 
-		const model = resolveDefaultModel(options.config);
-		return options.modelFactory.createAdapter(model);
+		if (!checkpoint) {
+			return options.modelFactory.createAdapter(resolveDefaultModel(options.config));
+		}
+		const model = `${checkpoint.adapterConfig.provider}/${checkpoint.adapterConfig.model}`;
+		return options.modelFactory.createAdapter(model, {
+			thinkingLevel: checkpoint.adapterConfig.thinkingLevel as
+				| 'off'
+				| 'minimal'
+				| 'low'
+				| 'medium'
+				| 'high'
+				| undefined,
+		});
 	};
 
 	// Create message router with configured adapter factory

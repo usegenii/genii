@@ -41,7 +41,7 @@ export interface ConversationManagerInterface {
 	 * @param destination - The destination to bind
 	 * @param agentId - The agent session ID to bind
 	 */
-	bind(destination: Destination, agentId: AgentSessionId): void;
+	bind(destination: Destination, agentId: AgentSessionId): Promise<void>;
 
 	/**
 	 * Unbind the agent from a destination.
@@ -50,7 +50,7 @@ export interface ConversationManagerInterface {
 	 *
 	 * @param destination - The destination to unbind
 	 */
-	unbind(destination: Destination): void;
+	unbind(destination: Destination): Promise<void>;
 
 	/**
 	 * Get a binding by destination.
@@ -104,6 +104,9 @@ export class ConversationManager implements ConversationManagerInterface {
 	/** Map from agentId to destination key for reverse lookups */
 	private readonly _byAgent: Map<AgentSessionId, string> = new Map();
 
+	/** Serializes persistence so an older snapshot can never replace a newer one. */
+	private _persistenceQueue: Promise<void> = Promise.resolve();
+
 	constructor(logger: Logger, store?: ConversationStore) {
 		this._logger = logger.child({ component: 'ConversationManager' });
 		this._store = store ?? null;
@@ -139,7 +142,7 @@ export class ConversationManager implements ConversationManagerInterface {
 		if (this._store) {
 			try {
 				const bindings = this.snapshot();
-				await this._store.save(bindings);
+				await this.persist();
 				this._logger.info({ count: bindings.length }, 'Persisted bindings');
 			} catch (error) {
 				this._logger.error({ error }, 'Failed to persist bindings');
@@ -169,7 +172,7 @@ export class ConversationManager implements ConversationManagerInterface {
 		return binding;
 	}
 
-	bind(destination: Destination, agentId: AgentSessionId): void {
+	async bind(destination: Destination, agentId: AgentSessionId): Promise<void> {
 		const binding = this.getOrCreate(destination);
 		const key = destinationKey(destination);
 
@@ -186,9 +189,10 @@ export class ConversationManager implements ConversationManagerInterface {
 		this._byAgent.set(agentId, key);
 
 		this._logger.debug({ destination: key, agentId }, 'Bound agent to destination');
+		await this.persist();
 	}
 
-	unbind(destination: Destination): void {
+	async unbind(destination: Destination): Promise<void> {
 		const key = destinationKey(destination);
 		const binding = this._byDestination.get(key);
 
@@ -200,6 +204,7 @@ export class ConversationManager implements ConversationManagerInterface {
 			binding.agentId = null;
 
 			this._logger.debug({ destination: key }, 'Unbound agent from destination');
+			await this.persist();
 		}
 	}
 
@@ -261,6 +266,30 @@ export class ConversationManager implements ConversationManagerInterface {
 		}
 
 		this._logger.debug({ count: bindings.length }, 'Restored bindings');
+	}
+
+	/**
+	 * Persist an immutable snapshot after all previously queued snapshots.
+	 *
+	 * A failed write rejects the mutation that requested it, but does not poison
+	 * the queue: a later mutation can still persist the current state.
+	 */
+	private persist(): Promise<void> {
+		const store = this._store;
+		if (!store) {
+			return Promise.resolve();
+		}
+
+		const bindings = this.snapshot().map((binding) => ({
+			...binding,
+			destination: { ...binding.destination },
+			createdAt: new Date(binding.createdAt),
+			lastActivityAt: new Date(binding.lastActivityAt),
+		}));
+
+		const write = this._persistenceQueue.then(() => store.save(bindings));
+		this._persistenceQueue = write.catch(() => undefined);
+		return write;
 	}
 
 	/**

@@ -9,6 +9,7 @@
 
 import type { Destination } from '@genii/comms/destination/types';
 import type { ChannelId, ChannelStatus } from '@genii/comms/types/core';
+import type { PendingRequestInfo, PendingResolution } from '@genii/orchestrator/events/types';
 import type {
 	AgentFilter,
 	AgentInput,
@@ -214,6 +215,8 @@ export type RpcMethodName =
 	| 'agent.send'
 	| 'agent.snapshot'
 	| 'agent.listCheckpoints'
+	| 'agent.pendingRequests'
+	| 'agent.resolveSuspensions'
 	// Channel methods
 	| 'channel.list'
 	| 'channel.get'
@@ -300,6 +303,13 @@ export interface RpcMethods {
 		model?: string;
 	};
 	'agent.listCheckpoints': Record<string, never>;
+	'agent.pendingRequests': {
+		sessionId: AgentSessionId;
+	};
+	'agent.resolveSuspensions': {
+		sessionId: AgentSessionId;
+		resolutions: PendingResolution[];
+	};
 
 	// Channel methods
 	'channel.list': Record<string, never>;
@@ -393,6 +403,8 @@ export interface RpcMethodResults {
 	'agent.snapshot': AgentSnapshot;
 	'agent.continue': { id: AgentSessionId };
 	'agent.listCheckpoints': AgentSessionId[];
+	'agent.pendingRequests': PendingRequestInfo[];
+	'agent.resolveSuspensions': { id: AgentSessionId };
 
 	// Channel methods
 	'channel.list': ChannelSummary[];

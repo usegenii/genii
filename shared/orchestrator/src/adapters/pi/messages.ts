@@ -4,6 +4,7 @@
  * Converts between Pi-native message format and the common checkpoint format.
  */
 
+import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -15,6 +16,24 @@ import type {
 	UserMessage,
 } from '@mariozechner/pi-ai';
 import type { CheckpointContent, CheckpointMessage } from '../../snapshot/types';
+
+/** Build the one real Pi tool-result message used by dormant replay. */
+export function agentToolResultToPiMessage(
+	toolCallId: string,
+	toolName: string,
+	result: AgentToolResult<unknown>,
+	isError = false,
+): ToolResultMessage {
+	return {
+		role: 'toolResult',
+		toolCallId,
+		toolName,
+		content: result.content,
+		details: result.details,
+		isError,
+		timestamp: Date.now(),
+	};
+}
 
 /**
  * Transform Pi messages to common checkpoint format.

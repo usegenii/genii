@@ -64,6 +64,8 @@ export class AgentHandleImpl implements AgentHandle {
 				stack: error instanceof Error ? error.stack : undefined,
 				timestamp: Date.now(),
 			});
+		} finally {
+			this.running = false;
 		}
 	}
 
@@ -79,6 +81,7 @@ export class AgentHandleImpl implements AgentHandle {
 		// Handle done event
 		if (event.type === 'done') {
 			this.result = event.result;
+			this._status = event.result.status;
 			if (this.waitResolve) {
 				this.waitResolve(event.result);
 			}
@@ -142,6 +145,9 @@ export class AgentHandleImpl implements AgentHandle {
 	}
 
 	async send(input: AgentInput): Promise<void> {
+		if (this._status === 'waiting' || this.instance.getPendingRequests().length > 0) {
+			throw new Error(`Agent ${this.id} is waiting for a suspension resolution`);
+		}
 		this.instance.send(input);
 	}
 
@@ -214,7 +220,7 @@ export class AgentHandleImpl implements AgentHandle {
 	}
 
 	async resolve(resolutions: PendingResolution[]): Promise<void> {
-		this.instance.resolve(resolutions);
+		await this.instance.resolve(resolutions);
 	}
 
 	/**

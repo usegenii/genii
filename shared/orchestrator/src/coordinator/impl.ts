@@ -6,14 +6,15 @@ import type { AgentAdapter } from '../adapters/types';
 import type { ContextInjectorRegistry } from '../context-injectors/registry';
 import type { ContextInjection } from '../context-injectors/types';
 import { TypedEventEmitter } from '../events/emitter';
-import type { CoordinatorEvent } from '../events/types';
+import type { CoordinatorEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../events/types';
 import { createGuidanceContext } from '../guidance/context';
 import type { GuidanceContext } from '../guidance/types';
 import { type AgentHandleImpl, createAgentHandle } from '../handle/impl';
 import type { AgentHandle } from '../handle/types';
 import { createSkillsLoader } from '../skills/loader';
 import type { LoadedSkill } from '../skills/types';
-import type { AgentCheckpoint } from '../snapshot/types';
+import { type AgentCheckpoint, CHECKPOINT_VERSION, type InstanceCheckpoint } from '../snapshot/types';
+import type { SuspensionRequest, ToolExecutionState } from '../tools/types';
 import {
 	type AgentFilter,
 	type AgentInput,
@@ -25,7 +26,7 @@ import {
 	type ShutdownOptions,
 } from '../types/core';
 import { type Logger, noopLogger } from '../types/logger';
-import type { ContinueConfig, Coordinator, CoordinatorConfig } from './types';
+import type { ContinueConfig, Coordinator, CoordinatorConfig, SuspensionRestoreConfig } from './types';
 
 /**
  * Tracked agent entry with handle and adapter.
@@ -127,6 +128,112 @@ export class CoordinatorImpl implements Coordinator {
 		return undefined;
 	}
 
+	/** Persist an adapter checkpoint with coordinator-owned model metadata. */
+	private async persistCheckpoint(checkpoint: InstanceCheckpoint, adapter: AgentAdapter): Promise<void> {
+		if (!this.config.snapshotStore) return;
+
+		const enrichedCheckpoint: AgentCheckpoint = {
+			...checkpoint,
+			version: CHECKPOINT_VERSION,
+			adapterConfig: {
+				...checkpoint.adapterConfig,
+				provider: adapter.modelProvider,
+				model: adapter.modelName,
+			},
+		};
+		await this.config.snapshotStore.save(enrichedCheckpoint);
+	}
+
+	/** Add a handle to coordinator tracking and forward all of its events. */
+	private trackHandle(handle: AgentHandleImpl, adapter: AgentAdapter): void {
+		this.agents.set(handle.id, { handle, adapter });
+
+		handle.subscribe((event) => {
+			this.emitter.emit({
+				type: 'agent_event',
+				sessionId: handle.id,
+				event,
+				timestamp: Date.now(),
+			});
+
+			if (event.type !== 'done') return;
+
+			this.emitter.emit({
+				type: 'agent_done',
+				sessionId: handle.id,
+				result: event.result,
+				timestamp: Date.now(),
+			});
+
+			// Terminal checkpointing is best effort. Suspension and accepted
+			// resolution checkpoints use the awaited adapter lifecycle hook.
+			void handle
+				.checkpoint()
+				.then((checkpoint) => this.persistCheckpoint(checkpoint, adapter))
+				.catch((error) => {
+					this.logger.error({ error, sessionId: handle.id }, 'Failed to save terminal agent checkpoint');
+				});
+		});
+	}
+
+	/** Lifecycle callback used by adapters for fail-closed durability barriers. */
+	private checkpointHook(adapter: AgentAdapter): (checkpoint: InstanceCheckpoint, reason: string) => Promise<void> {
+		return async (checkpoint, reason) => {
+			if (!this.config.snapshotStore) {
+				throw new Error(`Cannot persist ${reason} checkpoint: no snapshot store is configured`);
+			}
+			await this.persistCheckpoint(checkpoint, adapter);
+		};
+	}
+
+	private suspensionRequestToData(request: SuspensionRequest): SuspensionRequestData {
+		switch (request.type) {
+			case 'user_input':
+				return {
+					type: 'user_input',
+					prompt: request.request.prompt,
+					schema: request.request.schema,
+					timeout: request.request.timeout,
+				};
+			case 'approval':
+				return {
+					type: 'approval',
+					action: request.request.action,
+					description: request.request.description,
+					details: request.request.details,
+					timeout: request.request.timeout,
+				};
+			case 'event':
+				return {
+					type: 'event',
+					eventName: request.eventName,
+					timeout: request.options?.timeout,
+				};
+			case 'sleep':
+				return {
+					type: 'sleep',
+					durationMs: request.durationMs,
+					wakeAt: request.wakeAt,
+				};
+		}
+	}
+
+	private executionToPendingRequest(execution: ToolExecutionState): PendingRequestInfo | null {
+		const suspended = execution.suspendedStep;
+		if (!suspended) return null;
+		return {
+			suspensionId: suspended.suspensionId,
+			toolCallId: execution.toolCallId,
+			toolName: execution.toolName,
+			stepId: suspended.stepId,
+			type: suspended.request.type,
+			request: this.suspensionRequestToData(suspended.request),
+			suspendedAt: suspended.suspendedAt,
+			deadline: suspended.deadline,
+			status: suspended.status,
+		};
+	}
+
 	get status(): CoordinatorStatus {
 		return this._status;
 	}
@@ -153,11 +260,18 @@ export class CoordinatorImpl implements Coordinator {
 
 		const { graceful = true, timeoutMs = 30000 } = options;
 
+		// Waiting instances are already dormant. Flush their current checkpoint
+		// and detach them immediately; aborting would overwrite durable waiting
+		// state with a terminated result.
+		for (const { handle, adapter } of this.agents.values()) {
+			if (handle.status === 'waiting') {
+				await this.persistCheckpoint(await handle.checkpoint(), adapter);
+			}
+		}
+
 		if (graceful) {
 			// Wait for running agents to complete
-			const runningAgents = [...this.agents.values()]
-				.map((a) => a.handle)
-				.filter((h) => h.status === 'running' || h.status === 'waiting');
+			const runningAgents = [...this.agents.values()].map((a) => a.handle).filter((h) => h.status === 'running');
 
 			if (runningAgents.length > 0) {
 				const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
@@ -169,7 +283,7 @@ export class CoordinatorImpl implements Coordinator {
 
 		// Terminate any remaining agents
 		for (const { handle } of this.agents.values()) {
-			if (handle.status === 'running' || handle.status === 'waiting' || handle.status === 'paused') {
+			if (handle.status === 'running' || handle.status === 'paused') {
 				await handle.terminate('Coordinator shutdown');
 			}
 		}
@@ -231,55 +345,13 @@ export class CoordinatorImpl implements Coordinator {
 			skills,
 			contextInjection,
 			logger: this.logger,
+			onCheckpoint: this.checkpointHook(adapter),
 		});
 
 		// Create handle
 		const handle = createAgentHandle(instance, config);
 
-		// Store handle and adapter
-		this.agents.set(handle.id, { handle, adapter });
-
-		// Subscribe to agent events
-		handle.subscribe((event) => {
-			this.emitter.emit({
-				type: 'agent_event',
-				sessionId: handle.id,
-				event,
-				timestamp: Date.now(),
-			});
-
-			// Handle completion
-			if (event.type === 'done') {
-				this.emitter.emit({
-					type: 'agent_done',
-					sessionId: handle.id,
-					result: event.result,
-					timestamp: Date.now(),
-				});
-
-				// Save checkpoint if we have a store
-				if (this.config.snapshotStore) {
-					const agentEntry = this.agents.get(handle.id);
-					handle
-						.checkpoint()
-						.then((checkpoint) => {
-							// Inject Genii provider/model from adapter into checkpoint
-							const enrichedCheckpoint: AgentCheckpoint = {
-								...checkpoint,
-								adapterConfig: {
-									...checkpoint.adapterConfig,
-									provider: agentEntry?.adapter.modelProvider ?? 'unknown',
-									model: agentEntry?.adapter.modelName ?? 'unknown',
-								},
-							};
-							this.config.snapshotStore?.save(enrichedCheckpoint);
-						})
-						.catch((_error) => {
-							// Checkpoint save failed - non-fatal, agent completed successfully
-						});
-				}
-			}
-		});
+		this.trackHandle(handle, adapter);
 
 		// Emit spawned event
 		this.emitter.emit({
@@ -340,7 +412,12 @@ export class CoordinatorImpl implements Coordinator {
 		if (!this.config.snapshotStore) {
 			return null;
 		}
-		return this.config.snapshotStore.load(sessionId);
+		const checkpoint = await this.config.snapshotStore.load(sessionId);
+		const version = (checkpoint as { version?: unknown } | null)?.version;
+		if (version !== undefined && version !== CHECKPOINT_VERSION) {
+			throw new Error(`Unsupported checkpoint version: ${String(version)}`);
+		}
+		return checkpoint;
 	}
 
 	async continue(
@@ -357,6 +434,9 @@ export class CoordinatorImpl implements Coordinator {
 		const checkpoint = await this.loadCheckpoint(sessionId);
 		if (!checkpoint) {
 			throw new Error(`Checkpoint not found for session: ${sessionId}`);
+		}
+		if (checkpoint.toolExecutions.some((execution) => execution.suspendedStep)) {
+			throw new Error(`Session ${sessionId} is waiting for a suspension resolution`);
 		}
 
 		// Create guidance context from checkpoint
@@ -401,6 +481,7 @@ export class CoordinatorImpl implements Coordinator {
 			skills,
 			contextInjection,
 			logger: this.logger,
+			onCheckpoint: this.checkpointHook(adapter),
 		});
 
 		// Create handle - reusing the session ID from checkpoint
@@ -414,50 +495,7 @@ export class CoordinatorImpl implements Coordinator {
 		};
 		const handle = createAgentHandle(instance, spawnConfig);
 
-		// Store handle and adapter
-		this.agents.set(handle.id, { handle, adapter });
-
-		// Subscribe to agent events (same as spawn)
-		handle.subscribe((event) => {
-			this.emitter.emit({
-				type: 'agent_event',
-				sessionId: handle.id,
-				event,
-				timestamp: Date.now(),
-			});
-
-			// Handle completion
-			if (event.type === 'done') {
-				this.emitter.emit({
-					type: 'agent_done',
-					sessionId: handle.id,
-					result: event.result,
-					timestamp: Date.now(),
-				});
-
-				// Save checkpoint if we have a store (overwrites previous)
-				if (this.config.snapshotStore) {
-					const agentEntry = this.agents.get(handle.id);
-					handle
-						.checkpoint()
-						.then((checkpoint) => {
-							// Inject Genii provider/model from adapter into checkpoint
-							const enrichedCheckpoint: AgentCheckpoint = {
-								...checkpoint,
-								adapterConfig: {
-									...checkpoint.adapterConfig,
-									provider: agentEntry?.adapter.modelProvider ?? 'unknown',
-									model: agentEntry?.adapter.modelName ?? 'unknown',
-								},
-							};
-							this.config.snapshotStore?.save(enrichedCheckpoint);
-						})
-						.catch((_error) => {
-							// Checkpoint save failed - non-fatal
-						});
-				}
-			}
-		});
+		this.trackHandle(handle, adapter);
 
 		// Emit continued event (using spawned event type for now)
 		this.emitter.emit({
@@ -472,6 +510,114 @@ export class CoordinatorImpl implements Coordinator {
 		// binding the agent to a destination to avoid the race condition where
 		// events fire before the router has bound the agent.
 
+		return handle;
+	}
+
+	async getPendingRequests(sessionId: AgentSessionId): Promise<PendingRequestInfo[]> {
+		const live = this.agents.get(sessionId)?.handle;
+		if (live) {
+			return live.getPendingRequests();
+		}
+
+		const checkpoint = await this.loadCheckpoint(sessionId);
+		if (!checkpoint) return [];
+
+		return checkpoint.toolExecutions
+			.map((execution) => this.executionToPendingRequest(execution))
+			.filter((request): request is PendingRequestInfo => request !== null);
+	}
+
+	async restoreSuspended(
+		sessionId: AgentSessionId,
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle> {
+		if (this._status !== 'running') {
+			throw new Error(`Cannot restore suspended agent when coordinator is ${this._status}`);
+		}
+
+		const live = this.agents.get(sessionId)?.handle;
+		if (live) {
+			if (live.getPendingRequests().length === 0) {
+				throw new Error(`Session ${sessionId} has no pending suspensions`);
+			}
+			return live;
+		}
+
+		const checkpoint = await this.loadCheckpoint(sessionId);
+		if (!checkpoint) {
+			throw new Error(`Checkpoint not found for session: ${sessionId}`);
+		}
+		if (!checkpoint.toolExecutions.some((execution) => execution.suspendedStep)) {
+			throw new Error(`Session ${sessionId} has no pending suspensions`);
+		}
+
+		const guidancePath = checkpoint.guidance.guidancePath ?? this.config.defaultGuidancePath;
+		if (!guidancePath) {
+			throw new Error('No guidance path in checkpoint and no default configured');
+		}
+		const guidance = await createGuidanceContext({ root: guidancePath, logger: this.logger });
+
+		let skills: LoadedSkill[] = [];
+		if (this.config.skillsPath) {
+			const skillsLoader = createSkillsLoader({
+				skillsDir: this.config.skillsPath,
+				logger: this.logger,
+			});
+			skills = await skillsLoader.loadAll();
+		}
+
+		// Deliberately omit input and resume context. This restores the exact
+		// suspended tool invocation without manufacturing a user turn.
+		const instance = await adapter.restore(checkpoint, {
+			guidance,
+			task: checkpoint.session.task,
+			parentId: checkpoint.session.parentId,
+			tools: config?.tools,
+			tags: checkpoint.session.tags,
+			metadata: checkpoint.session.metadata,
+			skills,
+			logger: this.logger,
+			onCheckpoint: this.checkpointHook(adapter),
+		});
+
+		const spawnConfig: AgentSpawnConfig = {
+			guidancePath,
+			task: checkpoint.session.task,
+			parentId: checkpoint.session.parentId,
+			tags: checkpoint.session.tags,
+			metadata: checkpoint.session.metadata,
+		};
+		const handle = createAgentHandle(instance, spawnConfig);
+		this.trackHandle(handle, adapter);
+
+		this.emitter.emit({
+			type: 'agent_spawned',
+			sessionId: handle.id,
+			tags: spawnConfig.tags,
+			parentId: spawnConfig.parentId,
+			timestamp: Date.now(),
+		});
+
+		return handle;
+	}
+
+	async resolveSuspensions(
+		sessionId: AgentSessionId,
+		resolutions: PendingResolution[],
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle> {
+		if (resolutions.length === 0) {
+			throw new Error('At least one suspension resolution is required');
+		}
+
+		const handle = await this.restoreSuspended(sessionId, adapter, config);
+		await handle.resolve(resolutions);
+
+		// A warm handle is already inside start(); a dormant handle begins the
+		// replay loop here. Duplicate start calls are suppressed by AgentHandle.
+		void handle.start();
 		return handle;
 	}
 
