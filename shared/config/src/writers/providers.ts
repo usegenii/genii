@@ -4,8 +4,8 @@
  */
 
 import { join } from 'node:path';
-import { readTomlFileOptional } from '../loaders/toml.js';
-import { writeTomlFile } from './toml.js';
+import { readTomlTableMapOptional } from '../loaders/toml.js';
+import { writeTomlTableMap } from './toml.js';
 
 /**
  * Provider configuration for writing.
@@ -40,22 +40,22 @@ export async function saveProvidersConfig(
 	const filePath = join(basePath, 'providers.toml');
 
 	// Load existing providers if they exist
-	const existing = await readTomlFileOptional<Record<string, ProviderConfigWrite>>(filePath);
+	const existing = await readTomlTableMapOptional<ProviderConfigWrite>(filePath);
 
 	// Start with existing data
-	const merged: Record<string, unknown> = { ...existing };
+	const merged = new Map(Object.entries(existing ?? {}));
 
 	// Remove providers marked for deletion
 	if (providersToRemove) {
 		for (const name of providersToRemove) {
-			delete merged[name];
+			merged.delete(name);
 		}
 	}
 
 	// Merge new providers (new take precedence for same key)
 	for (const [key, value] of Object.entries(providers)) {
-		merged[key] = value;
+		merged.set(key, value);
 	}
 
-	await writeTomlFile(filePath, merged);
+	await writeTomlTableMap(filePath, Object.fromEntries(merged));
 }

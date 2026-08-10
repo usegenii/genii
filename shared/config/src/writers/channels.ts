@@ -4,8 +4,9 @@
  */
 
 import { join } from 'node:path';
-import { readTomlFileOptional } from '../loaders/toml.js';
-import { writeTomlFile } from './toml.js';
+import { readTomlTableMapOptional } from '../loaders/toml.js';
+import { isPlainRecord } from '../transform/keys.js';
+import { writeTomlTableMap } from './toml.js';
 
 /**
  * Channel configuration for writing.
@@ -32,22 +33,29 @@ export async function saveChannelsConfig(
 	const filePath = join(basePath, 'channels.toml');
 
 	// Load existing channels if they exist
-	const existing = await readTomlFileOptional<Record<string, unknown>>(filePath);
+	const existing = await readTomlTableMapOptional<unknown>(filePath);
 
 	// Start with existing data
-	const merged: Record<string, unknown> = { ...existing };
+	const merged = new Map(Object.entries(existing ?? {}));
 
 	// Remove channels marked for deletion
 	if (channelsToRemove) {
 		for (const name of channelsToRemove) {
-			delete merged[name];
+			if (isPlainRecord(merged.get(name))) {
+				merged.delete(name);
+			}
 		}
 	}
 
 	// Merge new channels (new take precedence)
 	for (const [name, config] of Object.entries(channels)) {
-		merged[name] = config;
+		const existingValue = merged.get(name);
+		if (merged.has(name) && !isPlainRecord(existingValue)) {
+			throw new Error(`Channel identifier "${name}" conflicts with an existing scalar setting`);
+		}
+		merged.set(name, config);
 	}
 
-	await writeTomlFile(filePath, merged);
+	// This writer does not own global settings, so preserve their exact spelling and precedence.
+	await writeTomlTableMap(filePath, Object.fromEntries(merged));
 }

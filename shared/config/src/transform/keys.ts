@@ -13,6 +13,18 @@ export function kebabToCamel(str: string): string {
 }
 
 /**
+ * Check whether a value is a plain record whose keys represent schema fields.
+ * TOML scalar objects such as dates must pass through without key transformation.
+ */
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+		return false;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+/**
  * Recursively transform all object keys from kebab-case to camelCase.
  *
  * @param obj - The object to transform
@@ -34,15 +46,10 @@ export function transformKeys<T>(obj: unknown): T {
 		return obj.map((item) => transformKeys(item)) as T;
 	}
 
-	if (typeof obj === 'object') {
-		const result: Record<string, unknown> = {};
-
-		for (const [key, value] of Object.entries(obj)) {
-			const camelKey = kebabToCamel(key);
-			result[camelKey] = transformKeys(value);
-		}
-
-		return result as T;
+	if (isPlainRecord(obj)) {
+		return Object.fromEntries(
+			Object.entries(obj).map(([key, value]) => [kebabToCamel(key), transformKeys(value)]),
+		) as T;
 	}
 
 	return obj as T;
@@ -84,15 +91,10 @@ export function transformKeysReverse<T>(obj: unknown): T {
 		return obj.map((item) => transformKeysReverse(item)) as T;
 	}
 
-	if (typeof obj === 'object') {
-		const result: Record<string, unknown> = {};
-
-		for (const [key, value] of Object.entries(obj)) {
-			const kebabKey = camelToKebab(key);
-			result[kebabKey] = transformKeysReverse(value);
-		}
-
-		return result as T;
+	if (isPlainRecord(obj)) {
+		return Object.fromEntries(
+			Object.entries(obj).map(([key, value]) => [camelToKebab(key), transformKeysReverse(value)]),
+		) as T;
 	}
 
 	return obj as T;

@@ -5,11 +5,12 @@
  */
 
 import { join } from 'node:path';
+import { loadModelsConfig } from '@genii/config/loaders/models';
 import { readTomlFileOptional } from '@genii/config/loaders/toml';
 import { CUSTOM_PROVIDER_DEFINITION, getProvider } from '@genii/config/providers/definitions';
 import { createSecretStore } from '@genii/config/secrets/composite';
 import { saveChannelsConfig } from '@genii/config/writers/channels';
-import type { ModelConfigWrite } from '@genii/config/writers/models';
+import { type ModelConfigWrite, writeModelsConfig } from '@genii/config/writers/models';
 import { savePreferencesConfig } from '@genii/config/writers/preferences';
 import { saveProvidersConfig } from '@genii/config/writers/providers';
 import { writeTomlFile } from '@genii/config/writers/toml';
@@ -24,6 +25,10 @@ export interface CompleteResult {
 	error?: string;
 	templatesCopied?: string[];
 	templatesBackedUp?: string[];
+}
+
+function createIdentifierRecord<T>(): Record<string, T> {
+	return Object.create(null) as Record<string, T>;
 }
 
 /**
@@ -63,9 +68,13 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	const secretStore = await createSecretStore(configPath, 'genii');
 
 	// 2. Process all providers (skip those marked for removal)
-	const providerConfigs: Record<string, { type: 'anthropic' | 'openai'; baseUrl: string; credential: string }> = {};
+	const providerConfigs = createIdentifierRecord<{
+		type: 'anthropic' | 'openai';
+		baseUrl: string;
+		credential: string;
+	}>();
 	const allSelectedModels: string[] = [];
-	const modelsConfig: Record<string, ModelConfigWrite> = {};
+	const modelsConfig = createIdentifierRecord<ModelConfigWrite>();
 
 	for (const provider of state.providers) {
 		if (state.providersToRemove.includes(provider.id)) continue;
@@ -122,11 +131,11 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	await saveProvidersConfig(configPath, providerConfigs, state.providersToRemove);
 
 	// 4. Write models.toml
-	const modelsPath = join(configPath, 'models.toml');
-	const existingModels = await readTomlFileOptional<Record<string, ModelConfigWrite>>(modelsPath);
+	const existingModels = await loadModelsConfig(configPath);
 
 	// Start with existing models
-	const finalModelsConfig: Record<string, ModelConfigWrite> = { ...existingModels };
+	const finalModelsConfig = createIdentifierRecord<ModelConfigWrite>();
+	Object.assign(finalModelsConfig, existingModels);
 
 	// Remove models belonging to removed providers
 	if (state.providersToRemove.length > 0) {
@@ -154,11 +163,15 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 	Object.assign(finalModelsConfig, modelsConfig);
 
 	// Write the full config
-	await writeTomlFile(modelsPath, finalModelsConfig);
+	await writeModelsConfig(configPath, finalModelsConfig);
 
 	// 5. Write channels.toml and store channel credentials
 	if (state.channels.length > 0) {
-		const channelConfigs: Record<string, { type: string; credential: string; [key: string]: unknown }> = {};
+		const channelConfigs = createIdentifierRecord<{
+			type: string;
+			credential: string;
+			[key: string]: unknown;
+		}>();
 
 		for (const channel of state.channels) {
 			// Skip channels marked for removal
@@ -178,10 +191,9 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 			}
 
 			// Build channel config with type-specific field transformation
-			const config: Record<string, unknown> = {
-				type: channel.type,
-				credential: `secret:${credentialSecretName}`,
-			};
+			const config = createIdentifierRecord<unknown>();
+			config.type = channel.type;
+			config.credential = `secret:${credentialSecretName}`;
 
 			if (channel.type === 'telegram') {
 				// Transform comma-separated user IDs to string array

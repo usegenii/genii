@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kebabToCamel, transformKeys } from './keys.js';
+import { kebabToCamel, transformKeys, transformKeysReverse } from './keys.js';
 
 describe('kebabToCamel', () => {
 	it('converts kebab-case to camelCase', () => {
@@ -69,5 +69,11 @@ describe('transformKeys', () => {
 		expect(transformKeys(true)).toBe(true);
 		expect(transformKeys(false)).toBe(false);
 		expect(transformKeys(0)).toBe(0);
+	});
+
+	it('preserves non-record scalar objects', () => {
+		const date = new Date('1979-05-27T07:32:00Z');
+		expect(transformKeys(date)).toBe(date);
+		expect(transformKeysReverse(date)).toBe(date);
 	});
 });
