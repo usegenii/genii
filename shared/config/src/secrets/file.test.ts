@@ -1,8 +1,18 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, type FileHandle, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { dirname, join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileSecretStore } from './file.js';
+
+const supportsPosixPermissions = typeof process.getuid === 'function';
+
+interface TestableFileSecretStore {
+	closeFile(file: FileHandle | undefined): Promise<unknown | undefined>;
+}
+
+async function getMode(path: string): Promise<number> {
+	return (await lstat(path)).mode & 0o777;
+}
 
 describe('FileSecretStore', () => {
 	let tempDir: string;
@@ -65,6 +75,63 @@ describe('FileSecretStore', () => {
 		});
 	});
 
+	describe('close failure handling', () => {
+		it('captures a rejecting file-handle close', async () => {
+			const closeError = new Error('simulated secrets file close failure');
+			const file = { close: vi.fn().mockRejectedValue(closeError) } as unknown as FileHandle;
+			const store = new FileSecretStore(secretsPath) as unknown as TestableFileSecretStore;
+
+			await expect(store.closeFile(file)).resolves.toBe(closeError);
+		});
+
+		it('returns a read error when the final secrets file close fails', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			const store = new FileSecretStore(secretsPath);
+			const testableStore = store as unknown as TestableFileSecretStore;
+			const originalCloseFile = testableStore.closeFile.bind(store);
+			const closeSpy = vi.spyOn(testableStore, 'closeFile').mockImplementation(async (file) => {
+				const closeError = await originalCloseFile(file);
+				return closeError ?? new Error('simulated secrets file close failure');
+			});
+
+			try {
+				const result = await store.get('key');
+
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error).toContain('Failed to read secrets:');
+					expect(result.error).toContain('simulated secrets file close failure');
+				}
+				expect(closeSpy).toHaveBeenCalledTimes(1);
+			} finally {
+				closeSpy.mockRestore();
+			}
+		});
+
+		it('returns a write error when the final secrets file close fails', async () => {
+			const store = new FileSecretStore(secretsPath);
+			const testableStore = store as unknown as TestableFileSecretStore;
+			const originalCloseFile = testableStore.closeFile.bind(store);
+			const closeSpy = vi.spyOn(testableStore, 'closeFile').mockImplementation(async (file) => {
+				const closeError = await originalCloseFile(file);
+				return closeError ?? new Error('simulated secrets file close failure');
+			});
+
+			try {
+				const result = await store.set('key', 'value');
+
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error).toContain('Failed to write secret:');
+					expect(result.error).toContain('simulated secrets file close failure');
+				}
+				expect(closeSpy).toHaveBeenCalledTimes(1);
+			} finally {
+				closeSpy.mockRestore();
+			}
+		});
+	});
+
 	describe('get non-existent secret', () => {
 		it('returns error for non-existent secret when file does not exist', async () => {
 			const store = new FileSecretStore(secretsPath);
@@ -105,6 +172,183 @@ describe('FileSecretStore', () => {
 				expect(getResult.value).toBe('value');
 			}
 		});
+
+		it.skipIf(!supportsPosixPermissions)(
+			'creates the data directory and secrets file with secure modes',
+			async () => {
+				const nestedPath = join(tempDir, 'nested', 'deep', 'secrets.json');
+				const store = new FileSecretStore(nestedPath);
+
+				const result = await store.set('key', 'value');
+
+				expect(result.success).toBe(true);
+				expect(await getMode(dirname(nestedPath))).toBe(0o700);
+				expect(await getMode(nestedPath)).toBe(0o600);
+			},
+		);
+	});
+
+	describe.skipIf(!supportsPosixPermissions)('POSIX ownership and permissions', () => {
+		it('repairs an overly permissive data directory before reading', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(secretsPath, 0o600);
+			await chmod(tempDir, 0o755);
+
+			const result = await new FileSecretStore(secretsPath).get('key');
+
+			expect(result).toEqual({ success: true, value: 'value' });
+			expect(await getMode(tempDir)).toBe(0o700);
+			expect(await getMode(secretsPath)).toBe(0o600);
+		});
+
+		it('repairs an overly permissive secrets file before reading', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(secretsPath, 0o644);
+
+			const result = await new FileSecretStore(secretsPath).get('key');
+
+			expect(result).toEqual({ success: true, value: 'value' });
+			expect(await getMode(tempDir)).toBe(0o700);
+			expect(await getMode(secretsPath)).toBe(0o600);
+		});
+
+		it('repairs modes that grant no access to the current owner before reading', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(secretsPath, 0o044);
+
+			try {
+				await chmod(tempDir, 0o077);
+				expect(await getMode(tempDir)).toBe(0o077);
+
+				const result = await new FileSecretStore(secretsPath).get('key');
+
+				expect(result).toEqual({ success: true, value: 'value' });
+				expect(await getMode(tempDir)).toBe(0o700);
+				expect(await getMode(secretsPath)).toBe(0o600);
+			} finally {
+				await chmod(tempDir, 0o700);
+			}
+		});
+
+		it('repairs existing permissions and preserves secrets when writing', async () => {
+			await writeFile(secretsPath, JSON.stringify({ existing: 'original' }), {
+				encoding: 'utf-8',
+				mode: 0o600,
+			});
+			await chmod(tempDir, 0o755);
+			await chmod(secretsPath, 0o644);
+
+			const result = await new FileSecretStore(secretsPath).set('added', 'new-value');
+
+			expect(result).toEqual({ success: true, value: 'new-value' });
+			expect(JSON.parse(await readFile(secretsPath, 'utf-8'))).toEqual({
+				existing: 'original',
+				added: 'new-value',
+			});
+			expect(await getMode(tempDir)).toBe(0o700);
+			expect(await getMode(secretsPath)).toBe(0o600);
+		});
+
+		it('fails closed without repairing a store not owned by the current user', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(tempDir, 0o755);
+
+			const posixProcess = process as NodeJS.Process & { getuid(): number };
+			const currentUid = posixProcess.getuid();
+			const getuidSpy = vi.spyOn(posixProcess, 'getuid').mockReturnValue(currentUid + 1);
+			try {
+				const result = await new FileSecretStore(secretsPath).get('key');
+
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error).toContain('Failed to read secrets:');
+					expect(result.error).toContain(tempDir);
+					expect(result.error).toContain('must be owned by the current user');
+					expect(result.error).toContain(`expected uid ${currentUid + 1}`);
+					expect(result.error).toContain(`found uid ${currentUid}`);
+					expect(result.error).toContain('Change its ownership');
+				}
+				expect(await getMode(tempDir)).toBe(0o755);
+			} finally {
+				getuidSpy.mockRestore();
+			}
+		});
+
+		it('rejects a symlinked secrets file without reading or modifying its target', async () => {
+			const targetPath = join(tempDir, 'target.json');
+			const targetContent = JSON.stringify({ key: 'target-value' });
+			await writeFile(targetPath, targetContent, { encoding: 'utf-8', mode: 0o600 });
+			await chmod(targetPath, 0o600);
+			await symlink(targetPath, secretsPath);
+
+			const store = new FileSecretStore(secretsPath);
+			const getResult = await store.get('key');
+			const setResult = await store.set('key', 'replacement');
+
+			expect(getResult.success).toBe(false);
+			if (!getResult.success) {
+				expect(getResult.error).toContain('Failed to read secrets:');
+				expect(getResult.error).toContain(secretsPath);
+				expect(getResult.error).toContain('must not be a symbolic link');
+			}
+			expect(setResult.success).toBe(false);
+			if (!setResult.success) {
+				expect(setResult.error).toContain('Failed to write secret:');
+				expect(setResult.error).toContain(secretsPath);
+				expect(setResult.error).toContain('must not be a symbolic link');
+			}
+			expect(await readFile(targetPath, 'utf-8')).toBe(targetContent);
+			expect(await getMode(targetPath)).toBe(0o600);
+		});
+
+		it('rejects a symlinked data directory', async () => {
+			const targetDir = join(tempDir, 'target');
+			const linkedDir = join(tempDir, 'linked');
+			await mkdir(targetDir, { mode: 0o700 });
+			await chmod(targetDir, 0o700);
+			await writeFile(join(targetDir, 'secrets.json'), JSON.stringify({ key: 'target-value' }), {
+				encoding: 'utf-8',
+				mode: 0o600,
+			});
+			await symlink(targetDir, linkedDir);
+
+			const result = await new FileSecretStore(join(linkedDir, 'secrets.json')).get('key');
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error).toContain('Failed to read secrets:');
+				expect(result.error).toContain(linkedDir);
+				expect(result.error).toContain('must not be a symbolic link');
+			}
+		});
+
+		it('rejects a directory in place of the secrets file', async () => {
+			await mkdir(secretsPath, { mode: 0o700 });
+			await chmod(secretsPath, 0o700);
+
+			const result = await new FileSecretStore(secretsPath).get('key');
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error).toContain('Failed to read secrets:');
+				expect(result.error).toContain(secretsPath);
+				expect(result.error).toContain('must be a regular file');
+			}
+		});
+
+		it('rejects a file in place of the data directory', async () => {
+			const dataPath = join(tempDir, 'not-a-directory');
+			await writeFile(dataPath, 'not a directory', { encoding: 'utf-8', mode: 0o600 });
+
+			const result = await new FileSecretStore(join(dataPath, 'secrets.json')).get('key');
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error).toContain('Failed to read secrets:');
+				expect(result.error).toContain(dataPath);
+				expect(result.error).toContain('must be a directory');
+			}
+		});
 	});
 
 	describe('malformed JSON handling', () => {
@@ -112,7 +356,7 @@ describe('FileSecretStore', () => {
 			const store = new FileSecretStore(secretsPath);
 
 			await mkdir(tempDir, { recursive: true });
-			await writeFile(secretsPath, 'not valid json {{{', 'utf-8');
+			await writeFile(secretsPath, 'not valid json {{{', { encoding: 'utf-8', mode: 0o600 });
 
 			const result = await store.get('key');
 
@@ -126,7 +370,7 @@ describe('FileSecretStore', () => {
 			const store = new FileSecretStore(secretsPath);
 
 			await mkdir(tempDir, { recursive: true });
-			await writeFile(secretsPath, 'not valid json {{{', 'utf-8');
+			await writeFile(secretsPath, 'not valid json {{{', { encoding: 'utf-8', mode: 0o600 });
 
 			const result = await store.set('key', 'value');
 

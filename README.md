@@ -58,7 +58,27 @@ On macOS, store your API key in the system keychain:
 security add-generic-password -s genii -a anthropic-api-key -w "sk-ant-your-key-here"
 ```
 
-On Linux, create a secrets file at `~/.config/genii/secrets.json`:
+On Linux, Genii prefers the system Secret Service through libsecret. If it is unavailable, such as on a headless
+host, Genii falls back to `<data-path>/secrets.json`, using the daemon's configured data path. The default data path is
+`$XDG_DATA_HOME/genii` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/genii`.
+
+On POSIX systems, Genii accepts the fallback only when the data path is a real directory, not a symbolic link, owned by
+the current user with mode `0700`, and `secrets.json` is a real regular file, not a symbolic link, owned by the current
+user with mode `0600`. Genii repairs incorrect modes automatically only when the existing path's type and ownership
+make that safe. It never changes ownership; if a path has an unsafe owner, type, or resolution, Genii fails closed with
+an error identifying the path and required remediation instead of reading or writing credentials.
+
+Create the default fallback paths securely before adding the JSON. If the daemon uses a custom data path, assign that
+path to `GENII_DATA_DIR` instead:
+
+```bash
+GENII_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/genii"
+umask 077
+mkdir -p "$GENII_DATA_DIR"
+chmod 700 "$GENII_DATA_DIR"
+touch "$GENII_DATA_DIR/secrets.json"
+chmod 600 "$GENII_DATA_DIR/secrets.json"
+```
 
 ```json
 {
