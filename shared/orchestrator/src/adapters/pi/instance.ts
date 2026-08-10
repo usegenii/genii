@@ -182,9 +182,6 @@ export class PiAgentInstance implements AgentInstance {
 				thinkingLevel: this.thinkingLevel,
 				tools: piTools,
 				messages: initialMessages as AgentMessage[],
-				isStreaming: false,
-				streamMessage: null,
-				pendingToolCalls: new Set(),
 			},
 			streamFn: async (...args) => {
 				// Get API key if we have a getter
@@ -198,6 +195,8 @@ export class PiAgentInstance implements AgentInstance {
 			},
 			steeringMode: 'one-at-a-time',
 			followUpMode: 'one-at-a-time',
+			// Tool execution state is shared across calls, so preserve pi 0.49's serial behavior.
+			toolExecution: 'sequential',
 		});
 
 		// Queue initial input
