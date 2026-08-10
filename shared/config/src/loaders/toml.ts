@@ -2,6 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'smol-toml';
 import { transformKeys } from '../transform/keys.js';
 
+function transformTomlTableMap<T>(parsed: unknown): Record<string, T> {
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		return {};
+	}
+
+	return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, transformKeys<T>(value)]));
+}
+
 /**
  * Read and parse a TOML file, transforming keys from kebab-case to camelCase.
  *
@@ -36,6 +44,30 @@ export async function readTomlFileOptional<T>(filePath: string): Promise<T | und
 		const content = await readFile(filePath, 'utf-8');
 		const parsed = parse(content);
 		return transformKeys<T>(parsed);
+	} catch (error) {
+		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
+/**
+ * Read a TOML document whose root keys are opaque table identifiers.
+ * Root identifiers are preserved verbatim while fields inside each table are normalized to camelCase.
+ */
+export async function readTomlTableMap<T>(filePath: string): Promise<Record<string, T>> {
+	const content = await readFile(filePath, 'utf-8');
+	return transformTomlTableMap<T>(parse(content));
+}
+
+/**
+ * Read an identifier-keyed TOML table map if it exists.
+ */
+export async function readTomlTableMapOptional<T>(filePath: string): Promise<Record<string, T> | undefined> {
+	try {
+		const content = await readFile(filePath, 'utf-8');
+		return transformTomlTableMap<T>(parse(content));
 	} catch (error) {
 		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
 			return undefined;

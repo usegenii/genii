@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { ProviderConfig } from '../types/provider.js';
-import { readTomlFileOptional } from './toml.js';
+import { readTomlTableMapOptional } from './toml.js';
 
 /**
  * Load provider configurations from a providers.toml file.
@@ -20,6 +20,6 @@ import { readTomlFileOptional } from './toml.js';
  */
 export async function loadProvidersConfig(basePath: string): Promise<Record<string, ProviderConfig>> {
 	const filePath = path.join(basePath, 'providers.toml');
-	const config = await readTomlFileOptional<Record<string, ProviderConfig>>(filePath);
+	const config = await readTomlTableMapOptional<ProviderConfig>(filePath);
 	return config ?? {};
 }

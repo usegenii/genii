@@ -26,6 +26,14 @@ vi.mock('@genii/config/writers/providers', () => ({
 	saveProvidersConfig: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@genii/config/loaders/models', () => ({
+	loadModelsConfig: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock('@genii/config/writers/models', () => ({
+	writeModelsConfig: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@genii/config/writers/toml', () => ({
 	writeTomlFile: vi.fn().mockResolvedValue(undefined),
 }));

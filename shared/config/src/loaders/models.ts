@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { ModelConfig } from '../types/model.js';
-import { readTomlFileOptional } from './toml.js';
+import { readTomlTableMapOptional } from './toml.js';
 
 /**
  * Load model configurations from a models.toml file.
@@ -21,6 +21,6 @@ import { readTomlFileOptional } from './toml.js';
  */
 export async function loadModelsConfig(basePath: string): Promise<Record<string, ModelConfig>> {
 	const filePath = path.join(basePath, 'models.toml');
-	const config = await readTomlFileOptional<Record<string, ModelConfig>>(filePath);
+	const config = await readTomlTableMapOptional<ModelConfig>(filePath);
 	return config ?? {};
 }

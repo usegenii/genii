@@ -166,13 +166,12 @@ export function registerOnboardCommand(program: Command): void {
 
 					// Write models config
 					const modelIds = (options.models as string).split(',').map((s: string) => s.trim());
-					const modelsConfig: Record<string, ModelConfigWrite> = {};
-					for (const modelId of modelIds) {
-						modelsConfig[modelId] = {
-							provider: options.provider,
+					const modelsConfig = Object.fromEntries(
+						modelIds.map((modelId) => [
 							modelId,
-						};
-					}
+							{ provider: options.provider, modelId } satisfies ModelConfigWrite,
+						]),
+					);
 					await saveModelsConfig(configPath, modelsConfig);
 					formatter.message(`Models configured: ${modelIds.join(', ')}`, 'success');
 

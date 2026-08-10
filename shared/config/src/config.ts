@@ -15,6 +15,10 @@ export interface ConfigOptions {
 	basePath?: string;
 }
 
+function getOwn<T>(record: Record<string, T>, name: string): T | undefined {
+	return Object.hasOwn(record, name) ? record[name] : undefined;
+}
+
 /**
  * Main configuration class providing typed access to all configuration sections.
  * This is a pure data container - secret resolution and environment preparation
@@ -49,7 +53,7 @@ export class Config {
 	 * Get a specific provider configuration by name
 	 */
 	getProvider(name: string): ProviderConfig | undefined {
-		return this.providers[name];
+		return getOwn(this.providers, name);
 	}
 
 	/**
@@ -63,7 +67,7 @@ export class Config {
 	 * Get a specific model configuration by name
 	 */
 	getModel(name: string): ModelConfig | undefined {
-		return this.models[name];
+		return getOwn(this.models, name);
 	}
 
 	/**
@@ -84,7 +88,7 @@ export class Config {
 	 * Get a specific channel configuration by name
 	 */
 	getChannel(name: string): ChannelConfig | undefined {
-		return this.channelsData.channels[name];
+		return getOwn(this.channelsData.channels, name);
 	}
 
 	/**

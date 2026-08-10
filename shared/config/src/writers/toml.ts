@@ -30,3 +30,15 @@ export async function writeTomlFile<T extends Record<string, unknown>>(filePath:
 	const content = stringify(kebabData);
 	await writeFile(filePath, content, 'utf-8');
 }
+
+/**
+ * Write a TOML document whose root keys are opaque table identifiers.
+ * Root identifiers are preserved verbatim while fields inside each table are normalized to kebab-case.
+ */
+export async function writeTomlTableMap<T>(filePath: string, data: Record<string, T>): Promise<void> {
+	await mkdir(dirname(filePath), { recursive: true });
+	const transformed = Object.fromEntries(
+		Object.entries(data).map(([key, value]) => [key, transformKeysReverse(value)]),
+	);
+	await writeFile(filePath, stringify(transformed), 'utf-8');
+}

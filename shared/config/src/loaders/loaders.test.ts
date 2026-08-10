@@ -6,7 +6,7 @@ import { loadChannelsConfig } from './channels.js';
 import { loadModelsConfig } from './models.js';
 import { loadPreferencesConfig } from './preferences.js';
 import { loadProvidersConfig } from './providers.js';
-import { readTomlFile, readTomlFileOptional } from './toml.js';
+import { readTomlFile, readTomlFileOptional, readTomlTableMapOptional } from './toml.js';
 
 describe('TOML Loaders', () => {
 	let tempDir: string;
@@ -69,16 +69,37 @@ nested-object = { inner-key = "nested-value" }
 		});
 	});
 
+	describe('readTomlTableMapOptional', () => {
+		it('reads identifier-keyed table maps without normalizing their identifiers', async () => {
+			const tomlContent = `
+[user-defined-table]
+schema-field = "test-value"
+
+["__proto__"]
+schema-field = "prototype-value"
+`;
+			const filePath = path.join(tempDir, 'preserve-top-level.toml');
+			await writeFile(filePath, tomlContent, 'utf-8');
+
+			const result = await readTomlTableMapOptional<{ schemaField: string }>(filePath);
+
+			expect(result?.['user-defined-table']).toEqual({ schemaField: 'test-value' });
+			expect(result?.userDefinedTable).toBeUndefined();
+			expect(Object.hasOwn(result ?? {}, '__proto__')).toBe(true);
+			expect(Reflect.get(result ?? {}, '__proto__')).toEqual({ schemaField: 'prototype-value' });
+		});
+	});
+
 	describe('loadProvidersConfig', () => {
 		it('loads and parses providers.toml', async () => {
 			const providersDir = path.join(tempDir, 'providers-test');
 			await mkdir(providersDir, { recursive: true });
 
 			const tomlContent = `
-[anthropic]
+[custom-provider]
 type = "anthropic"
-base-url = "https://api.anthropic.com"
-credential = "secret:anthropic-api-key"
+base-url = "https://api.example.com"
+credential = "secret:custom-provider-api-key"
 
 [openai]
 type = "openai"
@@ -89,10 +110,12 @@ credential = "secret:openai-api-key"
 
 			const result = await loadProvidersConfig(providersDir);
 
-			expect(result.anthropic).toBeDefined();
-			expect(result.anthropic.type).toBe('anthropic');
-			expect(result.anthropic.baseUrl).toBe('https://api.anthropic.com');
-			expect(result.anthropic.credential).toBe('secret:anthropic-api-key');
+			expect(result['custom-provider']).toEqual({
+				type: 'anthropic',
+				baseUrl: 'https://api.example.com',
+				credential: 'secret:custom-provider-api-key',
+			});
+			expect(result.customProvider).toBeUndefined();
 
 			expect(result.openai).toBeDefined();
 			expect(result.openai.type).toBe('openai');
@@ -114,9 +137,10 @@ credential = "secret:openai-api-key"
 			await mkdir(modelsDir, { recursive: true });
 
 			const tomlContent = `
-[claude-opus]
-provider = "anthropic"
-model-id = "claude-opus-4-5-20251101"
+[auto-agent]
+provider = "omniroute"
+model-id = "auto-agent"
+thinking-level = "high"
 
 [gpt-4]
 provider = "openai"
@@ -126,12 +150,13 @@ model-id = "gpt-4-turbo"
 
 			const result = await loadModelsConfig(modelsDir);
 
-			// Section names are also transformed to camelCase
-			expect(result.claudeOpus).toBeDefined();
-			expect(result.claudeOpus.provider).toBe('anthropic');
-			expect(result.claudeOpus.modelId).toBe('claude-opus-4-5-20251101');
+			expect(result['auto-agent']).toEqual({
+				provider: 'omniroute',
+				modelId: 'auto-agent',
+				thinkingLevel: 'high',
+			});
+			expect(result.autoAgent).toBeUndefined();
 
-			// gpt-4 stays as gpt-4 because the regex only transforms -[a-z]
 			expect(result['gpt-4']).toBeDefined();
 			expect(result['gpt-4'].provider).toBe('openai');
 			expect(result['gpt-4'].modelId).toBe('gpt-4-turbo');
@@ -172,13 +197,16 @@ credential = "secret:discord-bot-token"
 			expect(result.settings.maxMessageLength).toBe(5000);
 			expect(result.settings.rateLimitPerMinute).toBe(120);
 
-			// Section names are also transformed to camelCase
-			expect(result.channels.telegramPersonal).toBeDefined();
-			expect(result.channels.telegramPersonal.type).toBe('telegram');
-			expect(result.channels.telegramPersonal.credential).toBe('secret:telegram-bot-token');
+			expect(result.channels['telegram-personal']).toEqual({
+				type: 'telegram',
+				credential: 'secret:telegram-bot-token',
+				allowedUserIds: ['123456789'],
+				pollingIntervalMs: 1000,
+			});
+			expect(result.channels.telegramPersonal).toBeUndefined();
 
-			expect(result.channels.discordServer).toBeDefined();
-			expect(result.channels.discordServer.type).toBe('discord');
+			expect(result.channels['discord-server']).toBeDefined();
+			expect(result.channels['discord-server'].type).toBe('discord');
 		});
 
 		it('returns defaults for missing file', async () => {

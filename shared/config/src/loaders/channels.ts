@@ -1,6 +1,7 @@
 import path from 'node:path';
+import { isPlainRecord } from '../transform/keys.js';
 import type { ChannelConfig, ChannelsConfig } from '../types/channel.js';
-import { readTomlFileOptional } from './toml.js';
+import { readTomlTableMapOptional } from './toml.js';
 
 /**
  * Result of loading the channels configuration file
@@ -14,8 +15,6 @@ export interface ChannelsLoadResult {
  * Raw TOML structure before separating settings from channels
  */
 interface RawChannelsToml {
-	maxMessageLength?: number;
-	rateLimitPerMinute?: number;
 	[key: string]: unknown;
 }
 
@@ -26,6 +25,24 @@ const DEFAULT_SETTINGS: ChannelsConfig = {
 	maxMessageLength: 4000,
 	rateLimitPerMinute: 60,
 };
+
+const CHANNEL_SETTING_KEYS = {
+	maxMessageLength: ['max-message-length', 'maxMessageLength'],
+	rateLimitPerMinute: ['rate-limit-per-minute', 'rateLimitPerMinute'],
+} as const;
+
+function getNumberSetting(
+	raw: RawChannelsToml,
+	[canonicalKey, legacyKey]: readonly [string, string],
+	defaultValue: number,
+): number {
+	const canonicalValue = raw[canonicalKey];
+	if (typeof canonicalValue === 'number') {
+		return canonicalValue;
+	}
+	const legacyValue = raw[legacyKey];
+	return typeof legacyValue === 'number' ? legacyValue : defaultValue;
+}
 
 /**
  * Load channels configuration from a TOML file.
@@ -52,7 +69,7 @@ const DEFAULT_SETTINGS: ChannelsConfig = {
  */
 export async function loadChannelsConfig(basePath: string): Promise<ChannelsLoadResult> {
 	const filePath = path.join(basePath, 'channels.toml');
-	const raw = await readTomlFileOptional<RawChannelsToml>(filePath);
+	const raw = await readTomlTableMapOptional<unknown>(filePath);
 
 	if (!raw) {
 		return {
@@ -63,20 +80,22 @@ export async function loadChannelsConfig(basePath: string): Promise<ChannelsLoad
 
 	// Extract global settings
 	const settings: ChannelsConfig = {
-		maxMessageLength: raw.maxMessageLength ?? DEFAULT_SETTINGS.maxMessageLength,
-		rateLimitPerMinute: raw.rateLimitPerMinute ?? DEFAULT_SETTINGS.rateLimitPerMinute,
+		maxMessageLength: getNumberSetting(
+			raw,
+			CHANNEL_SETTING_KEYS.maxMessageLength,
+			DEFAULT_SETTINGS.maxMessageLength,
+		),
+		rateLimitPerMinute: getNumberSetting(
+			raw,
+			CHANNEL_SETTING_KEYS.rateLimitPerMinute,
+			DEFAULT_SETTINGS.rateLimitPerMinute,
+		),
 	};
 
 	// Extract channel configurations (all keys that are objects)
-	const channels: Record<string, ChannelConfig> = {};
-	for (const [key, value] of Object.entries(raw)) {
-		if (key === 'maxMessageLength' || key === 'rateLimitPerMinute') {
-			continue;
-		}
-		if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-			channels[key] = value as ChannelConfig;
-		}
-	}
+	const channels = Object.fromEntries(
+		Object.entries(raw).filter((entry): entry is [string, ChannelConfig] => isPlainRecord(entry[1])),
+	);
 
 	return { settings, channels };
 }

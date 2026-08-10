@@ -78,6 +78,42 @@ describe('Config', () => {
 		return createConfig(mockProviders, mockModels, mockChannelsData, mockPreferences);
 	}
 
+	describe('exact identifier lookup', () => {
+		it('supports __proto__ identifiers without exposing inherited keys', () => {
+			const prototypeProvider: ProviderConfig = {
+				type: 'openai',
+				baseUrl: 'https://api.example.com/v1',
+				credential: secretRef('prototype-provider-api-key'),
+			};
+			const prototypeModel: ModelConfig = {
+				provider: '__proto__',
+				modelId: 'auto-agent',
+			};
+			const prototypeChannel: ChannelConfig = {
+				type: 'telegram',
+				credential: secretRef('prototype-channel-credential'),
+				allowedUserIds: ['123456789'],
+				pollingIntervalMs: 1000,
+			};
+			const config = createConfig(
+				Object.fromEntries([['__proto__', prototypeProvider]]),
+				Object.fromEntries([['__proto__', prototypeModel]]),
+				{
+					settings: mockChannelSettings,
+					channels: Object.fromEntries([['__proto__', prototypeChannel]]),
+				},
+				mockPreferences,
+			);
+
+			expect(config.getProvider('__proto__')).toEqual(prototypeProvider);
+			expect(config.getModel('__proto__')).toEqual(prototypeModel);
+			expect(config.getChannel('__proto__')).toEqual(prototypeChannel);
+			expect(config.getProvider('toString')).toBeUndefined();
+			expect(config.getModel('toString')).toBeUndefined();
+			expect(config.getChannel('toString')).toBeUndefined();
+		});
+	});
+
 	describe('getProviders', () => {
 		it('returns all providers', () => {
 			const config = createTestConfig();

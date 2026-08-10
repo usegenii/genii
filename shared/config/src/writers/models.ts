@@ -4,8 +4,8 @@
  */
 
 import { join } from 'node:path';
-import { readTomlFileOptional } from '../loaders/toml.js';
-import { writeTomlFile } from './toml.js';
+import { readTomlTableMapOptional } from '../loaders/toml.js';
+import { writeTomlTableMap } from './toml.js';
 
 /**
  * Model configuration for writing.
@@ -36,13 +36,20 @@ export async function saveModelsConfig(basePath: string, models: Record<string, 
 	const filePath = join(basePath, 'models.toml');
 
 	// Load existing models if they exist
-	const existing = await readTomlFileOptional<Record<string, ModelConfigWrite>>(filePath);
+	const existing = await readTomlTableMapOptional<ModelConfigWrite>(filePath);
 
 	// Merge new models with existing (new models take precedence for same key)
-	const merged = {
-		...existing,
-		...models,
-	};
+	const merged = new Map(Object.entries(existing ?? {}));
+	for (const [name, config] of Object.entries(models)) {
+		merged.set(name, config);
+	}
 
-	await writeTomlFile(filePath, merged);
+	await writeModelsConfig(basePath, Object.fromEntries(merged));
+}
+
+/**
+ * Replace the complete models configuration with an exact identifier-keyed map.
+ */
+export async function writeModelsConfig(basePath: string, models: Record<string, ModelConfigWrite>): Promise<void> {
+	await writeTomlTableMap(join(basePath, 'models.toml'), models);
 }
