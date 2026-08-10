@@ -1,5 +1,5 @@
 import { constants, type Stats } from 'node:fs';
-import { chmod, type FileHandle, lstat, mkdir, open } from 'node:fs/promises';
+import { type FileHandle, lstat, mkdir, open } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { SecretResult, SecretStore } from './types.js';
 
@@ -7,7 +7,7 @@ const DIRECTORY_MODE = 0o700;
 const SECRET_FILE_MODE = 0o600;
 const POSIX_MODE_MASK = 0o7777;
 
-type SecurePathKind = 'directory' | 'file';
+type SecretPathKind = 'directory' | 'file';
 
 interface OpenSecretFile {
 	handle: FileHandle;
@@ -32,8 +32,8 @@ export class FileSecretStore implements SecretStore {
 		let file: FileHandle | undefined;
 		let result: SecretResult;
 		try {
-			await this.secureDirectory(false);
-			file = await this.openSecureExistingFile(false);
+			await this.ensureDataDirectory(false);
+			file = await this.openValidatedExistingFile(false);
 
 			const secrets = await this.readSecrets(file);
 			if (secrets === null) {
@@ -70,8 +70,8 @@ export class FileSecretStore implements SecretStore {
 		let file: FileHandle | undefined;
 		let result: SecretResult;
 		try {
-			await this.secureDirectory(true);
-			const openedFile = await this.openSecureFileForWrite();
+			await this.ensureDataDirectory(true);
+			const openedFile = await this.openFileForWrite();
 			file = openedFile.handle;
 
 			const secrets = openedFile.created ? {} : await this.readSecrets(file);
@@ -80,8 +80,8 @@ export class FileSecretStore implements SecretStore {
 			} else {
 				secrets[name] = value;
 				await this.replaceContents(file, JSON.stringify(secrets, null, '\t'));
-				await this.secureHandle(file, 'Secrets file', this.filePath, 'file', SECRET_FILE_MODE);
-				await this.secureDirectory(false);
+				await this.validateHandle(file, 'Secrets file', this.filePath, 'file');
+				await this.ensureDataDirectory(false);
 
 				result = { success: true, value };
 			}
@@ -100,9 +100,10 @@ export class FileSecretStore implements SecretStore {
 	}
 
 	/**
-	 * Ensure the containing data directory is a real, current-user-owned 0700 directory on POSIX.
+	 * Ensure the containing data directory is real, current-user-owned, and no more permissive than 0700 on POSIX.
+	 * The requested mode applies only when mkdir creates a missing path; existing permissions are validation-only.
 	 */
-	private async secureDirectory(create: boolean): Promise<void> {
+	private async ensureDataDirectory(create: boolean): Promise<void> {
 		const directoryPath = dirname(this.filePath);
 		if (create) {
 			try {
@@ -116,50 +117,26 @@ export class FileSecretStore implements SecretStore {
 
 		const pathStats = await lstat(directoryPath);
 		this.validatePath(pathStats, 'Secret data directory', directoryPath, 'directory');
-
-		if (!this.usesPosixPermissions()) {
-			return;
-		}
-
-		let directory: FileHandle | undefined;
-		try {
-			directory = await this.openPathWithRepair(
-				pathStats,
-				'Secret data directory',
-				directoryPath,
-				'directory',
-				DIRECTORY_MODE,
-				constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-			);
-			await this.secureHandle(directory, 'Secret data directory', directoryPath, 'directory', DIRECTORY_MODE);
-		} catch (error) {
-			if (this.isNodeError(error) && (error.code === 'ELOOP' || error.code === 'EMLINK')) {
-				throw this.symbolicLinkError('Secret data directory', directoryPath, 'directory');
-			}
-			throw error;
-		} finally {
-			await directory?.close();
-		}
 	}
 
 	/**
-	 * Open an existing file securely. Writable opens retain the validated inode and never truncate before validation.
+	 * Open and validate an existing file. Writable opens retain the validated inode and never truncate before validation.
 	 */
-	private async openSecureExistingFile(writable: boolean): Promise<FileHandle> {
-		const readOnlyFile = await this.openAndSecureExistingFile(constants.O_RDONLY);
+	private async openValidatedExistingFile(writable: boolean): Promise<FileHandle> {
+		const readOnlyFile = await this.openAndValidateExistingFile(constants.O_RDONLY);
 		if (!writable) {
 			return readOnlyFile.handle;
 		}
 
 		let writableFile: { handle: FileHandle; stats: Stats } | undefined;
 		try {
-			writableFile = await this.openAndSecureExistingFile(constants.O_RDWR);
+			writableFile = await this.openAndValidateExistingFile(constants.O_RDWR);
 			if (
 				readOnlyFile.stats.dev !== writableFile.stats.dev ||
 				readOnlyFile.stats.ino !== writableFile.stats.ino
 			) {
 				throw new Error(
-					`Secrets file '${this.filePath}' changed while it was being secured. Retry the operation.`,
+					`Secrets file '${this.filePath}' changed while it was being validated. Retry the operation.`,
 				);
 			}
 
@@ -175,47 +152,49 @@ export class FileSecretStore implements SecretStore {
 	/**
 	 * Open a new or existing file for writing without following a final-component symlink on POSIX.
 	 */
-	private async openSecureFileForWrite(): Promise<OpenSecretFile> {
+	private async openFileForWrite(): Promise<OpenSecretFile> {
 		if (await this.pathExists(this.filePath)) {
-			return { handle: await this.openSecureExistingFile(true), created: false };
+			return { handle: await this.openValidatedExistingFile(true), created: false };
 		}
 
 		let file: FileHandle | undefined;
 		try {
 			file = await open(
 				this.filePath,
-				this.secureFileFlags(constants.O_CREAT | constants.O_EXCL | constants.O_RDWR),
+				this.fileOpenFlags(constants.O_CREAT | constants.O_EXCL | constants.O_RDWR),
 				SECRET_FILE_MODE,
 			);
-			await this.secureHandle(file, 'Secrets file', this.filePath, 'file', SECRET_FILE_MODE);
+			await this.validateHandle(file, 'Secrets file', this.filePath, 'file');
 			return { handle: file, created: true };
 		} catch (error) {
 			await file?.close();
 			if (this.isNodeError(error) && error.code === 'EEXIST') {
-				return { handle: await this.openSecureExistingFile(true), created: false };
+				return { handle: await this.openValidatedExistingFile(true), created: false };
+			}
+			if (this.isAccessError(error)) {
+				throw this.createFileAccessError(error);
 			}
 			throw error;
 		}
 	}
 
 	/**
-	 * Validate a path before opening it, then validate and repair the opened file handle.
+	 * Validate a path before opening it, then validate the opened file handle without changing its permissions.
 	 */
-	private async openAndSecureExistingFile(flags: number): Promise<{ handle: FileHandle; stats: Stats }> {
+	private async openAndValidateExistingFile(flags: number): Promise<{ handle: FileHandle; stats: Stats }> {
 		const pathStats = await lstat(this.filePath);
 		this.validatePath(pathStats, 'Secrets file', this.filePath, 'file');
 
 		let file: FileHandle | undefined;
 		try {
-			file = await this.openPathWithRepair(
-				pathStats,
+			file = await this.openValidatedPath(
 				'Secrets file',
 				this.filePath,
 				'file',
 				SECRET_FILE_MODE,
-				this.secureFileFlags(flags),
+				this.fileOpenFlags(flags),
 			);
-			const stats = await this.secureHandle(file, 'Secrets file', this.filePath, 'file', SECRET_FILE_MODE);
+			const stats = await this.validateHandle(file, 'Secrets file', this.filePath, 'file');
 			return { handle: file, stats };
 		} catch (error) {
 			await file?.close();
@@ -227,53 +206,27 @@ export class FileSecretStore implements SecretStore {
 	}
 
 	/**
-	 * Validate ownership and type, repair the mode when safe, then verify the resulting metadata.
+	 * Validate ownership, type, and permissions on an opened path without changing its metadata.
 	 */
-	private async secureHandle(
+	private async validateHandle(
 		handle: FileHandle,
 		label: string,
 		path: string,
-		kind: SecurePathKind,
-		expectedMode: number,
+		kind: SecretPathKind,
 	): Promise<Stats> {
-		let stats = await handle.stat();
+		const stats = await handle.stat();
 		this.validatePath(stats, label, path, kind);
-
-		if (!this.usesPosixPermissions()) {
-			return stats;
-		}
-
-		if ((stats.mode & POSIX_MODE_MASK) !== expectedMode) {
-			try {
-				await handle.chmod(expectedMode);
-			} catch (error) {
-				throw new Error(
-					`Unable to secure ${label.toLowerCase()} '${path}' with mode ${this.formatMode(expectedMode)}: ${this.getErrorMessage(error)}. Set the required mode and retry.`,
-				);
-			}
-		}
-
-		stats = await handle.stat();
-		this.validatePath(stats, label, path, kind);
-		const actualMode = stats.mode & POSIX_MODE_MASK;
-		if (actualMode !== expectedMode) {
-			throw new Error(
-				`${label} '${path}' must use mode ${this.formatMode(expectedMode)}, but mode ${this.formatMode(actualMode)} remains after repair. Set the required mode and retry.`,
-			);
-		}
-
 		return stats;
 	}
 
 	/**
-	 * Open a validated path, repairing its mode by path only when its current mode prevents a handle-based repair.
+	 * Open a validated path without following a final-component symlink or changing existing permissions.
 	 */
-	private async openPathWithRepair(
-		pathStats: Stats,
+	private async openValidatedPath(
 		label: string,
 		path: string,
-		kind: SecurePathKind,
-		expectedMode: number,
+		kind: SecretPathKind,
+		allowedMode: number,
 		flags: number,
 	): Promise<FileHandle> {
 		try {
@@ -282,70 +235,17 @@ export class FileSecretStore implements SecretStore {
 			if (this.isSymbolicLinkError(error)) {
 				throw this.symbolicLinkError(label, path, kind);
 			}
-			if (
-				!this.usesPosixPermissions() ||
-				!this.isAccessError(error) ||
-				(pathStats.mode & POSIX_MODE_MASK) === expectedMode
-			) {
-				if (this.isAccessError(error)) {
-					throw this.accessError(label, path, expectedMode, error);
-				}
-				throw error;
+			if (this.isAccessError(error)) {
+				throw this.accessError(label, path, allowedMode, error);
 			}
-
-			await this.repairModeByPath(pathStats, label, path, kind, expectedMode);
-			try {
-				return await open(path, flags);
-			} catch (retryError) {
-				if (this.isSymbolicLinkError(retryError)) {
-					throw this.symbolicLinkError(label, path, kind);
-				}
-				if (this.isAccessError(retryError)) {
-					throw this.accessError(label, path, expectedMode, retryError);
-				}
-				throw retryError;
-			}
-		}
-	}
-
-	/**
-	 * Repair a path after ownership/type validation, then ensure the path still names the same object.
-	 */
-	private async repairModeByPath(
-		originalStats: Stats,
-		label: string,
-		path: string,
-		kind: SecurePathKind,
-		expectedMode: number,
-	): Promise<void> {
-		try {
-			await chmod(path, expectedMode);
-		} catch (error) {
-			throw new Error(
-				`Unable to secure ${label.toLowerCase()} '${path}' with mode ${this.formatMode(expectedMode)} after access was denied: ${this.getErrorMessage(error)}. Set the required mode and retry.`,
-			);
-		}
-
-		const repairedStats = await lstat(path);
-		this.validatePath(repairedStats, label, path, kind);
-		if (originalStats.dev !== repairedStats.dev || originalStats.ino !== repairedStats.ino) {
-			throw new Error(
-				`${label} '${path}' changed while its permissions were being repaired. Retry the operation.`,
-			);
-		}
-
-		const actualMode = repairedStats.mode & POSIX_MODE_MASK;
-		if (actualMode !== expectedMode) {
-			throw new Error(
-				`${label} '${path}' must use mode ${this.formatMode(expectedMode)}, but mode ${this.formatMode(actualMode)} remains after repair. Set the required mode and retry.`,
-			);
+			throw error;
 		}
 	}
 
 	/**
 	 * Validate path type and ownership without reading its contents.
 	 */
-	private validatePath(stats: Stats, label: string, path: string, kind: SecurePathKind): void {
+	private validatePath(stats: Stats, label: string, path: string, kind: SecretPathKind): void {
 		if (stats.isSymbolicLink()) {
 			throw this.symbolicLinkError(label, path, kind);
 		}
@@ -367,10 +267,21 @@ export class FileSecretStore implements SecretStore {
 				`${label} '${path}' must be owned by the current user (expected uid ${currentUid}, found uid ${stats.uid}). Change its ownership to uid ${currentUid} and retry.`,
 			);
 		}
+
+		if (this.usesPosixPermissions()) {
+			const allowedMode = kind === 'directory' ? DIRECTORY_MODE : SECRET_FILE_MODE;
+			const actualMode = stats.mode & POSIX_MODE_MASK;
+			const disallowedMode = actualMode & (POSIX_MODE_MASK ^ allowedMode);
+			if (disallowedMode !== 0) {
+				throw new Error(
+					`${label} '${path}' has insecure mode ${this.formatMode(actualMode)}. Permissions must be a subset of ${this.formatMode(allowedMode)} with no group, world, or special permission bits. Use chmod to set mode ${this.formatMode(allowedMode)} or a stricter subset and retry; Genii will not change existing permissions.`,
+				);
+			}
+		}
 	}
 
 	/**
-	 * Read and parse an already-secured secrets file.
+	 * Read and parse an already-validated secrets file.
 	 * Returns null if JSON is malformed, throws for other errors.
 	 */
 	private async readSecrets(file: FileHandle): Promise<Record<string, string> | null> {
@@ -399,7 +310,7 @@ export class FileSecretStore implements SecretStore {
 		}
 	}
 
-	private secureFileFlags(flags: number): number {
+	private fileOpenFlags(flags: number): number {
 		if (!this.usesPosixPermissions()) {
 			return flags;
 		}
@@ -422,15 +333,22 @@ export class FileSecretStore implements SecretStore {
 		return process.getuid();
 	}
 
-	private symbolicLinkError(label: string, path: string, kind: SecurePathKind): Error {
+	private symbolicLinkError(label: string, path: string, kind: SecretPathKind): Error {
 		return new Error(
 			`${label} '${path}' must not be a symbolic link. Replace it with a real ${kind} owned by the current user and retry.`,
 		);
 	}
 
-	private accessError(label: string, path: string, expectedMode: number, error: unknown): Error {
+	private createFileAccessError(error: unknown): Error {
+		const directoryPath = dirname(this.filePath);
 		return new Error(
-			`Unable to access ${label.toLowerCase()} '${path}': ${this.getErrorMessage(error)}. Verify current-user ownership, mode ${this.formatMode(expectedMode)}, and any access-control entries, then retry.`,
+			`Unable to create secrets file '${this.filePath}': ${this.getErrorMessage(error)}. The existing data directory '${directoryPath}' must grant the owner write and execute access within mode ${this.formatMode(DIRECTORY_MODE)}. Use chmod to set a usable subset such as ${this.formatMode(DIRECTORY_MODE)} and retry; Genii will not change existing permissions.`,
+		);
+	}
+
+	private accessError(label: string, path: string, allowedMode: number, error: unknown): Error {
+		return new Error(
+			`Unable to access ${label.toLowerCase()} '${path}': ${this.getErrorMessage(error)}. Verify current-user ownership, a usable mode that is a subset of ${this.formatMode(allowedMode)}, and any access-control entries, then retry. Genii will not change existing permissions.`,
 		);
 	}
 
@@ -459,7 +377,7 @@ export class FileSecretStore implements SecretStore {
 	}
 
 	private formatMode(mode: number): string {
-		return `0${mode.toString(8)}`;
+		return `0${mode.toString(8).padStart(3, '0')}`;
 	}
 
 	/**

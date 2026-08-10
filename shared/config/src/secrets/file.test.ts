@@ -11,7 +11,7 @@ interface TestableFileSecretStore {
 }
 
 async function getMode(path: string): Promise<number> {
-	return (await lstat(path)).mode & 0o777;
+	return (await lstat(path)).mode & 0o7777;
 }
 
 describe('FileSecretStore', () => {
@@ -189,69 +189,180 @@ describe('FileSecretStore', () => {
 	});
 
 	describe.skipIf(!supportsPosixPermissions)('POSIX ownership and permissions', () => {
-		it('repairs an overly permissive data directory before reading', async () => {
+		it('reads from secure permission subsets without changing existing modes', async () => {
 			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
-			await chmod(secretsPath, 0o600);
-			await chmod(tempDir, 0o755);
-
-			const result = await new FileSecretStore(secretsPath).get('key');
-
-			expect(result).toEqual({ success: true, value: 'value' });
-			expect(await getMode(tempDir)).toBe(0o700);
-			expect(await getMode(secretsPath)).toBe(0o600);
-		});
-
-		it('repairs an overly permissive secrets file before reading', async () => {
-			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
-			await chmod(secretsPath, 0o644);
-
-			const result = await new FileSecretStore(secretsPath).get('key');
-
-			expect(result).toEqual({ success: true, value: 'value' });
-			expect(await getMode(tempDir)).toBe(0o700);
-			expect(await getMode(secretsPath)).toBe(0o600);
-		});
-
-		it('repairs modes that grant no access to the current owner before reading', async () => {
-			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
-			await chmod(secretsPath, 0o044);
+			await chmod(secretsPath, 0o400);
 
 			try {
-				await chmod(tempDir, 0o077);
-				expect(await getMode(tempDir)).toBe(0o077);
+				await chmod(tempDir, 0o500);
 
 				const result = await new FileSecretStore(secretsPath).get('key');
 
 				expect(result).toEqual({ success: true, value: 'value' });
-				expect(await getMode(tempDir)).toBe(0o700);
+				expect(await getMode(tempDir)).toBe(0o500);
+				expect(await getMode(secretsPath)).toBe(0o400);
+			} finally {
+				await chmod(tempDir, 0o700);
+			}
+		});
+
+		it('reads through an execute-only secure data directory without changing existing modes', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(secretsPath, 0o400);
+
+			try {
+				await chmod(tempDir, 0o100);
+
+				const result = await new FileSecretStore(secretsPath).get('key');
+
+				expect(result).toEqual({ success: true, value: 'value' });
+				expect(await getMode(tempDir)).toBe(0o100);
+				expect(await getMode(secretsPath)).toBe(0o400);
+			} finally {
+				await chmod(tempDir, 0o700);
+			}
+		});
+
+		it('writes through a secure directory permission subset without changing existing modes', async () => {
+			await writeFile(secretsPath, JSON.stringify({ existing: 'original' }), {
+				encoding: 'utf-8',
+				mode: 0o600,
+			});
+
+			try {
+				await chmod(tempDir, 0o500);
+
+				const result = await new FileSecretStore(secretsPath).set('added', 'new-value');
+
+				expect(result).toEqual({ success: true, value: 'new-value' });
+				expect(JSON.parse(await readFile(secretsPath, 'utf-8'))).toEqual({
+					existing: 'original',
+					added: 'new-value',
+				});
+				expect(await getMode(tempDir)).toBe(0o500);
 				expect(await getMode(secretsPath)).toBe(0o600);
 			} finally {
 				await chmod(tempDir, 0o700);
 			}
 		});
 
-		it('repairs existing permissions and preserves secrets when writing', async () => {
-			await writeFile(secretsPath, JSON.stringify({ existing: 'original' }), {
-				encoding: 'utf-8',
-				mode: 0o600,
-			});
-			await chmod(tempDir, 0o755);
-			await chmod(secretsPath, 0o644);
+		it('returns actionable guidance when a secure existing directory cannot create the secrets file', async () => {
+			try {
+				await chmod(tempDir, 0o500);
 
-			const result = await new FileSecretStore(secretsPath).set('added', 'new-value');
+				const result = await new FileSecretStore(secretsPath).set('key', 'value');
 
-			expect(result).toEqual({ success: true, value: 'new-value' });
-			expect(JSON.parse(await readFile(secretsPath, 'utf-8'))).toEqual({
-				existing: 'original',
-				added: 'new-value',
-			});
-			expect(await getMode(tempDir)).toBe(0o700);
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error).toContain('Failed to write secret:');
+					expect(result.error).toContain(tempDir);
+					expect(result.error).toMatch(/chmod.*0700|owner.*write.*execute/i);
+				}
+				expect(await getMode(tempDir)).toBe(0o500);
+				await expect(lstat(secretsPath)).rejects.toMatchObject({ code: 'ENOENT' });
+			} finally {
+				await chmod(tempDir, 0o700);
+			}
+		});
+
+		it.each([
+			{ mode: 0o755, formattedMode: '0755' },
+			{ mode: 0o077, formattedMode: '0077' },
+		])('rejects data-directory mode $formattedMode without changing it', async ({ mode, formattedMode }) => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+
+			try {
+				await chmod(tempDir, mode);
+				const result = await new FileSecretStore(secretsPath).get('key');
+
+				expect(result.success).toBe(false);
+				if (!result.success) {
+					expect(result.error).toContain('Failed to read secrets:');
+					expect(result.error).toContain(tempDir);
+					expect(result.error).toContain(formattedMode);
+					expect(result.error).toContain('0700');
+					expect(result.error).toContain('chmod');
+				}
+				expect(await getMode(tempDir)).toBe(mode);
+			} finally {
+				await chmod(tempDir, 0o700);
+			}
 			expect(await getMode(secretsPath)).toBe(0o600);
+		});
+
+		it.each([
+			{ mode: 0o644, formattedMode: '0644' },
+			{ mode: 0o044, formattedMode: '0044' },
+		])(
+			'rejects secrets-file mode $formattedMode without changing it or its contents',
+			async ({ mode, formattedMode }) => {
+				const originalContent = JSON.stringify({ key: 'value' });
+				await writeFile(secretsPath, originalContent, { encoding: 'utf-8', mode: 0o600 });
+				await chmod(secretsPath, mode);
+
+				const store = new FileSecretStore(secretsPath);
+				const getResult = await store.get('key');
+				const setResult = await store.set('key', 'replacement');
+
+				expect(getResult.success).toBe(false);
+				if (!getResult.success) {
+					expect(getResult.error).toContain('Failed to read secrets:');
+					expect(getResult.error).toContain(secretsPath);
+					expect(getResult.error).toContain(formattedMode);
+					expect(getResult.error).toContain('0600');
+					expect(getResult.error).toContain('chmod');
+				}
+				expect(setResult.success).toBe(false);
+				if (!setResult.success) {
+					expect(setResult.error).toContain('Failed to write secret:');
+					expect(setResult.error).toContain(secretsPath);
+					expect(setResult.error).toContain(formattedMode);
+					expect(setResult.error).toContain('0600');
+					expect(setResult.error).toContain('chmod');
+				}
+				expect(await getMode(secretsPath)).toBe(mode);
+				await chmod(secretsPath, 0o600);
+				expect(await readFile(secretsPath, 'utf-8')).toBe(originalContent);
+			},
+		);
+
+		it('rejects special permission bits on the data directory without changing its mode', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(tempDir, 0o1700);
+
+			const result = await new FileSecretStore(secretsPath).get('key');
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error).toContain('Failed to read secrets:');
+				expect(result.error).toContain(tempDir);
+				expect(result.error).toContain('01700');
+				expect(result.error).toContain('0700');
+				expect(result.error).toContain('chmod');
+			}
+			expect(await getMode(tempDir)).toBe(0o1700);
+		});
+
+		it('rejects special permission bits on the secrets file without changing its mode', async () => {
+			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
+			await chmod(secretsPath, 0o4600);
+
+			const result = await new FileSecretStore(secretsPath).get('key');
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error).toContain('Failed to read secrets:');
+				expect(result.error).toContain(secretsPath);
+				expect(result.error).toContain('04600');
+				expect(result.error).toContain('0600');
+				expect(result.error).toContain('chmod');
+			}
+			expect(await getMode(secretsPath)).toBe(0o4600);
 		});
 
 		it('fails closed without repairing a store not owned by the current user', async () => {
 			await writeFile(secretsPath, JSON.stringify({ key: 'value' }), { encoding: 'utf-8', mode: 0o600 });
-			await chmod(tempDir, 0o755);
+			await chmod(tempDir, 0o700);
 
 			const posixProcess = process as NodeJS.Process & { getuid(): number };
 			const currentUid = posixProcess.getuid();
@@ -268,7 +379,7 @@ describe('FileSecretStore', () => {
 					expect(result.error).toContain(`found uid ${currentUid}`);
 					expect(result.error).toContain('Change its ownership');
 				}
-				expect(await getMode(tempDir)).toBe(0o755);
+				expect(await getMode(tempDir)).toBe(0o700);
 			} finally {
 				getuidSpy.mockRestore();
 			}
