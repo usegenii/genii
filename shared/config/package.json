@@ -37,7 +37,7 @@
 	"packageManager": "pnpm@11.20.0",
 	"dependencies": {
 		"@napi-rs/keyring": "1.2.0",
-		"@sinclair/typebox": "0.34.48",
+		"@sinclair/typebox": "0.34.52",
 		"smol-toml": "1.6.0"
 	},
 	"devDependencies": {
