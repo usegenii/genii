@@ -1,9 +1,12 @@
+import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createDaemonClient, type DaemonClient, type DaemonClientOptions, getSocketPath } from './client';
 
 interface RpcRequest {
 	id: string;
@@ -15,14 +18,26 @@ interface PingServer {
 	requests: RpcRequest[];
 }
 
+interface ClientProbeInput {
+	mode: 'ping' | 'resolve';
+	socketPath?: string;
+}
+
+const execFileAsync = promisify(execFile);
+const clientProbePath = fileURLToPath(new URL('./__fixtures__/client-probe.ts', import.meta.url));
+const tsxImportUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 let nextPipeId = 1;
 
-function restoreEnvironment(name: 'GENII_SOCKET' | 'XDG_RUNTIME_DIR', value: string | undefined): void {
-	if (value === undefined) {
-		delete process.env[name];
-	} else {
-		process.env[name] = value;
-	}
+function createClientEnvironment(runtimeDirectory: string, geniiSocket?: string): NodeJS.ProcessEnv {
+	const inheritedEnvironment = Object.fromEntries(
+		Object.entries(process.env).filter(([name]) => name !== 'GENII_SOCKET' && name !== 'XDG_RUNTIME_DIR'),
+	);
+
+	return {
+		...inheritedEnvironment,
+		XDG_RUNTIME_DIR: runtimeDirectory,
+		...(geniiSocket === undefined ? {} : { GENII_SOCKET: geniiSocket }),
+	};
 }
 
 function getDisposableSocketPath(directory: string, name: string): string {
@@ -37,7 +52,6 @@ async function startPingServer(socketPath: string): Promise<PingServer> {
 	const requests: RpcRequest[] = [];
 	const server = createServer((socket) => {
 		let buffer = '';
-
 		socket.on('data', (chunk: Buffer) => {
 			buffer += chunk.toString('utf8');
 			const lines = buffer.split('\n');
@@ -83,74 +97,69 @@ async function closeServer(server: Server): Promise<void> {
 	});
 }
 
-describe('daemon client socket path precedence', () => {
-	let clients: DaemonClient[];
-	let originalGeniiSocket: string | undefined;
-	let originalRuntimeDirectory: string | undefined;
+async function runClientProbe(input: ClientProbeInput, environment: NodeJS.ProcessEnv): Promise<string> {
+	const { stdout } = await execFileAsync(
+		process.execPath,
+		['--import', tsxImportUrl, clientProbePath, JSON.stringify(input)],
+		{
+			encoding: 'utf8',
+			env: environment,
+			timeout: 5000,
+		},
+	);
+
+	return stdout.toString();
+}
+
+describe('SocketDaemonClient socket path resolution', () => {
 	let servers: PingServer[];
 	let testDirectory: string;
 
 	beforeEach(async () => {
-		originalGeniiSocket = process.env.GENII_SOCKET;
-		originalRuntimeDirectory = process.env.XDG_RUNTIME_DIR;
 		testDirectory = await mkdtemp(join(tmpdir(), 'genii-cli-client-'));
-		clients = [];
 		servers = [];
-		delete process.env.GENII_SOCKET;
-		process.env.XDG_RUNTIME_DIR = testDirectory;
 	});
 
 	afterEach(async () => {
-		await Promise.all(clients.map((client) => client.disconnect()));
 		await Promise.all(servers.map(({ server }) => closeServer(server)));
-		restoreEnvironment('GENII_SOCKET', originalGeniiSocket);
-		restoreEnvironment('XDG_RUNTIME_DIR', originalRuntimeDirectory);
 		await rm(testDirectory, { recursive: true, force: true });
 	});
 
-	function createTrackedClient(options: DaemonClientOptions = {}): DaemonClient {
-		const client = createDaemonClient({
-			connectTimeoutMs: 1000,
-			requestTimeoutMs: 1000,
-			...options,
-		});
-		clients.push(client);
-		return client;
-	}
-
-	async function expectPing(client: DaemonClient, pingServer: PingServer): Promise<void> {
-		await client.connect();
-		await expect(client.ping()).resolves.toEqual({ pong: true });
+	async function expectPing(
+		input: ClientProbeInput,
+		environment: NodeJS.ProcessEnv,
+		pingServer: PingServer,
+	): Promise<void> {
+		await runClientProbe(input, environment);
 		expect(pingServer.requests).toHaveLength(1);
 		expect(pingServer.requests[0]?.method).toBe('daemon.ping');
 	}
 
-	it('uses an explicit socket path before GENII_SOCKET', async () => {
+	it('prefers an explicit socket path over GENII_SOCKET', async () => {
 		const explicitSocketPath = getDisposableSocketPath(testDirectory, 'explicit');
-		process.env.GENII_SOCKET = getDisposableSocketPath(testDirectory, 'environment');
+		const environmentSocketPath = getDisposableSocketPath(testDirectory, 'environment');
+		const environment = createClientEnvironment(testDirectory, environmentSocketPath);
 		const pingServer = await startPingServer(explicitSocketPath);
 		servers.push(pingServer);
 
-		const client = createTrackedClient({ socketPath: explicitSocketPath });
-
-		await expectPing(client, pingServer);
+		await expectPing({ mode: 'ping', socketPath: explicitSocketPath }, environment, pingServer);
 	});
 
-	it('uses GENII_SOCKET before the platform default', async () => {
+	it('uses GENII_SOCKET when no explicit socket path is provided', async () => {
 		const environmentSocketPath = getDisposableSocketPath(testDirectory, 'environment');
-		process.env.GENII_SOCKET = environmentSocketPath;
+		const environment = createClientEnvironment(testDirectory, environmentSocketPath);
 		const pingServer = await startPingServer(environmentSocketPath);
 		servers.push(pingServer);
 
-		const client = createTrackedClient();
-
-		await expectPing(client, pingServer);
+		await expectPing({ mode: 'ping' }, environment, pingServer);
 	});
 
-	it('uses the platform default when no override is set', async () => {
+	it('uses the platform default when neither an explicit path nor GENII_SOCKET is provided', async () => {
+		const environment = createClientEnvironment(testDirectory);
 		const defaultSocketPath =
 			process.platform === 'win32' ? '\\\\.\\pipe\\genii-daemon' : join(testDirectory, 'genii-daemon.sock');
-		expect(getSocketPath()).toBe(defaultSocketPath);
+
+		expect(await runClientProbe({ mode: 'resolve' }, environment)).toBe(defaultSocketPath);
 
 		if (process.platform === 'win32') {
 			return;
@@ -158,8 +167,6 @@ describe('daemon client socket path precedence', () => {
 
 		const pingServer = await startPingServer(defaultSocketPath);
 		servers.push(pingServer);
-		const client = createTrackedClient();
-
-		await expectPing(client, pingServer);
+		await expectPing({ mode: 'ping' }, environment, pingServer);
 	});
 });
