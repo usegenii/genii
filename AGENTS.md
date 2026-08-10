@@ -41,6 +41,15 @@ Example workflow:
 
 This significantly speeds up completion of multi-step work.
 
+## Architecture Documentation
+
+Keep `ARCHITECTURE.md` aligned with Genii's high-level design.
+
+- Update `ARCHITECTURE.md` whenever work introduces a major architectural change, including changes to system
+  boundaries, runtime topology, execution or persistence models, trust boundaries, or primary control and data flows
+- Keep architecture updates conceptual and implementation-agnostic; do not add code or repository structure details
+- Treat required architecture documentation updates as part of task completion
+
 ## Pre-Finish Checklist
 
 Before finishing any task or marking work as complete:
