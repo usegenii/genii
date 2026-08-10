@@ -128,6 +128,41 @@ export interface SpawnAgentOptions {
 	instruction?: string;
 }
 
+/** Stable opaque identifier for one durable tool suspension. */
+export type SuspensionId = string & { readonly __suspensionId: unique symbol };
+
+/** A typed resolution for one exact suspension. */
+export type PendingResolution =
+	| { suspensionId: SuspensionId; type: 'user_input'; value: unknown }
+	| { suspensionId: SuspensionId; type: 'approval'; approved: boolean; reason?: string }
+	| { suspensionId: SuspensionId; type: 'event'; payload: unknown }
+	| { suspensionId: SuspensionId; type: 'sleep' }
+	| { suspensionId: SuspensionId; type: 'cancel'; reason?: string }
+	| { suspensionId: SuspensionId; type: 'timeout' };
+
+/** Durable suspension returned by the daemon without restoring the model. */
+export interface PendingRequestInfo {
+	suspensionId: SuspensionId;
+	toolCallId: string;
+	toolName: string;
+	stepId: string;
+	type: 'user_input' | 'approval' | 'event' | 'sleep';
+	request:
+		| { type: 'user_input'; prompt: string; schema?: unknown; timeout?: number }
+		| {
+				type: 'approval';
+				action: string;
+				description?: string;
+				details?: Record<string, unknown>;
+				timeout?: number;
+		  }
+		| { type: 'event'; eventName: string; timeout?: number }
+		| { type: 'sleep'; durationMs: number; wakeAt: number };
+	suspendedAt: number;
+	deadline?: number;
+	status: 'waiting' | 'resolved';
+}
+
 /**
  * Channel summary for listing.
  */
@@ -389,6 +424,8 @@ export interface DaemonClient {
 	spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }>;
 	continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }>;
 	listCheckpoints(): Promise<string[]>;
+	getPendingRequests(sessionId: string): Promise<PendingRequestInfo[]>;
+	resolveSuspensions(sessionId: string, resolutions: PendingResolution[]): Promise<{ id: string }>;
 	terminateAgent(id: string, reason?: string): Promise<void>;
 	pauseAgent(id: string): Promise<void>;
 	resumeAgent(id: string): Promise<void>;
@@ -643,6 +680,14 @@ class SocketDaemonClient implements DaemonClient {
 
 	async listCheckpoints(): Promise<string[]> {
 		return this._request('agent.listCheckpoints', {});
+	}
+
+	async getPendingRequests(sessionId: string): Promise<PendingRequestInfo[]> {
+		return this._request('agent.pendingRequests', { sessionId });
+	}
+
+	async resolveSuspensions(sessionId: string, resolutions: PendingResolution[]): Promise<{ id: string }> {
+		return this._request('agent.resolveSuspensions', { sessionId, resolutions });
 	}
 
 	async terminateAgent(id: string, reason?: string): Promise<void> {

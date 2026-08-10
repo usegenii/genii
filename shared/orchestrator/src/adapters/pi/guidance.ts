@@ -7,10 +7,17 @@ import type { Static, TSchema } from '@sinclair/typebox';
 import type { GuidanceContext } from '../../guidance/types';
 import { formatSkillsForPrompt } from '../../skills/format';
 import type { LoadedSkill } from '../../skills/types';
-import type { ToolExecutionState } from '../../snapshot/types';
 import { createStepContext, type StepContextImpl } from '../../tools/step-context';
 import { isSuspensionError } from '../../tools/suspension';
-import type { StepResumeData, SuspensionRequest, Tool, ToolContext, ToolResult } from '../../tools/types';
+import type {
+	CompletedStep,
+	StepResumeData,
+	SuspensionRequest,
+	Tool,
+	ToolContext,
+	ToolExecutionState,
+	ToolResult,
+} from '../../tools/types';
 
 /**
  * Build the system prompt from guidance context.
@@ -92,18 +99,35 @@ export async function buildSystemPromptWithTask(
  * Context for tracking tool execution state during suspension.
  */
 export interface ToolExecutionTracker {
-	/** Current tool call ID */
-	toolCallId: string | null;
-	/** Current tool name */
-	toolName: string | null;
-	/** Current tool input */
-	toolInput: unknown | null;
-	/** Step context for current execution */
-	stepContext: StepContextImpl | null;
-	/** Suspended requests */
-	suspendedRequests: Map<string, { request: SuspensionRequest; stepId: string }>;
-	/** Resume data for suspended steps */
-	resumeData: Map<string, StepResumeData>;
+	/** Execution state is isolated by Pi's stable tool-call ID. */
+	executions: Map<string, TrackedToolExecution>;
+}
+
+/** Runtime-only state for one executing tool call. */
+export interface TrackedToolExecution {
+	toolCallId: string;
+	toolName: string;
+	input: unknown;
+	stepContext: StepContextImpl;
+	completedSteps: CompletedStep[];
+}
+
+/** Snapshot passed to the durable suspension lifecycle. */
+export interface ToolSuspensionContext {
+	toolCallId: string;
+	toolName: string;
+	input: unknown;
+	stepId: string;
+	request: SuspensionRequest;
+	completedSteps: CompletedStep[];
+}
+
+/** Snapshot of a tool invocation immediately before Pi receives its result. */
+export interface ToolCompletionContext {
+	toolCallId: string;
+	toolName: string;
+	input: unknown;
+	completedSteps: CompletedStep[];
 }
 
 /**
@@ -111,12 +135,7 @@ export interface ToolExecutionTracker {
  */
 export function createToolExecutionTracker(): ToolExecutionTracker {
 	return {
-		toolCallId: null,
-		toolName: null,
-		toolInput: null,
-		stepContext: null,
-		suspendedRequests: new Map(),
-		resumeData: new Map(),
+		executions: new Map(),
 	};
 }
 
@@ -130,11 +149,12 @@ export function buildPiTools(
 	abortSignal: AbortSignal,
 	tracker: ToolExecutionTracker,
 	onProgress?: (toolCallId: string, toolName: string, progress: unknown) => void,
-	onSuspend?: (toolCallId: string, toolName: string, stepId: string, request: SuspensionRequest) => void,
+	onSuspend?: (suspension: ToolSuspensionContext) => Promise<StepResumeData>,
 	getResumeData?: (toolCallId: string) => ToolExecutionState | undefined,
+	onComplete?: (completion: ToolCompletionContext, result: AgentToolResult<unknown>) => Promise<void>,
 ): PiAgentTool<TSchema>[] {
 	return tools.map((tool) =>
-		convertTool(tool, sessionId, guidance, abortSignal, tracker, onProgress, onSuspend, getResumeData),
+		convertTool(tool, sessionId, guidance, abortSignal, tracker, onProgress, onSuspend, getResumeData, onComplete),
 	);
 }
 
@@ -148,8 +168,9 @@ function convertTool(
 	abortSignal: AbortSignal,
 	tracker: ToolExecutionTracker,
 	onProgress?: (toolCallId: string, toolName: string, progress: unknown) => void,
-	onSuspend?: (toolCallId: string, toolName: string, stepId: string, request: SuspensionRequest) => void,
+	onSuspend?: (suspension: ToolSuspensionContext) => Promise<StepResumeData>,
 	getResumeData?: (toolCallId: string) => ToolExecutionState | undefined,
+	onComplete?: (completion: ToolCompletionContext, result: AgentToolResult<unknown>) => Promise<void>,
 ): PiAgentTool<TSchema> {
 	return {
 		name: tool.name,
@@ -162,85 +183,76 @@ function convertTool(
 			signal?: AbortSignal,
 			onUpdate?: (partialResult: AgentToolResult<unknown>) => void,
 		): Promise<AgentToolResult<unknown>> => {
-			// Set up tracking
-			tracker.toolCallId = toolCallId;
-			tracker.toolName = tool.name;
-			tracker.toolInput = params;
+			let completedSteps = getResumeData?.(toolCallId)?.completedSteps ?? [];
+			let resumeData = getResumeData?.(toolCallId)?.suspendedStep?.resumeData;
 
-			// Check for resume data
-			const existingState = getResumeData?.(toolCallId);
-			tracker.stepContext = createStepContext({
-				completedSteps: existingState?.completedSteps,
-				resumeData: tracker.resumeData.get(toolCallId),
-				onEvent: (event) => {
-					if (event.type === 'suspended') {
-						const suspensionRequest = event.request as SuspensionRequest;
-						const stepId = `${toolCallId}:${tracker.stepContext?.getCompletedSteps().length ?? 0}`;
-						tracker.suspendedRequests.set(toolCallId, {
-							request: suspensionRequest,
-							stepId,
+			// A suspension unwinds the user tool, but never escapes into Pi's
+			// error-finalization path. Once resolved, the wrapper replays the same
+			// invocation with memoized steps and the exact suspended step result.
+			while (true) {
+				const stepContext = createStepContext({ completedSteps, resumeData });
+				tracker.executions.set(toolCallId, {
+					toolCallId,
+					toolName: tool.name,
+					input: params,
+					stepContext,
+					completedSteps,
+				});
+
+				const context: ToolContext = {
+					sessionId,
+					guidance,
+					signal: signal ?? abortSignal,
+					step: stepContext,
+					emitProgress: (progress) => {
+						onProgress?.(toolCallId, tool.name, progress);
+						if (onUpdate && progress.message) {
+							onUpdate({
+								content: [{ type: 'text', text: progress.message }],
+								details: progress.data,
+							});
+						}
+					},
+					log: (level, message) => {
+						console[level]?.(`[${tool.name}] ${message}`);
+					},
+				};
+
+				let toolResult: AgentToolResult<unknown>;
+				try {
+					toolResult = toolResultToAgentToolResult(await tool.execute(params, context));
+				} catch (error) {
+					completedSteps = stepContext.getCompletedSteps();
+					if (!isSuspensionError(error)) {
+						toolResult = {
+							content: [
+								{
+									type: 'text',
+									text: error instanceof Error ? error.message : String(error),
+								},
+							],
+							details: undefined,
+						};
+					} else if (!onSuspend) {
+						tracker.executions.delete(toolCallId);
+						throw new Error(`Tool "${tool.name}" suspended without a suspension lifecycle`);
+					} else {
+						resumeData = await onSuspend({
+							toolCallId,
+							toolName: tool.name,
+							input: params,
+							stepId: error.stepId,
+							request: error.request,
+							completedSteps,
 						});
-						onSuspend?.(toolCallId, tool.name, stepId, suspensionRequest);
+						continue;
 					}
-				},
-			});
-
-			// Create tool context
-			const context: ToolContext = {
-				sessionId,
-				guidance,
-				signal: signal ?? abortSignal,
-				step: tracker.stepContext,
-				emitProgress: (progress) => {
-					onProgress?.(toolCallId, tool.name, progress);
-					if (onUpdate && progress.message) {
-						onUpdate({
-							content: [{ type: 'text', text: progress.message }],
-							details: progress.data,
-						});
-					}
-				},
-				log: (level, message) => {
-					// Could be connected to a logging system
-					console[level]?.(`[${tool.name}] ${message}`);
-				},
-			};
-
-			try {
-				const result = await tool.execute(params, context);
-
-				// Clear tracking
-				tracker.toolCallId = null;
-				tracker.toolName = null;
-				tracker.toolInput = null;
-				tracker.stepContext = null;
-				tracker.suspendedRequests.delete(toolCallId);
-
-				return toolResultToAgentToolResult(result);
-			} catch (error) {
-				// Check for suspension
-				if (isSuspensionError(error)) {
-					// The suspension has been tracked via onEvent
-					// Re-throw to let the adapter handle it
-					throw error;
 				}
 
-				// Clear tracking on error
-				tracker.toolCallId = null;
-				tracker.toolName = null;
-				tracker.toolInput = null;
-				tracker.stepContext = null;
-
-				// Return error result
-				return {
-					content: [
-						{
-							type: 'text',
-							text: error instanceof Error ? error.message : String(error),
-						},
-					],
-					details: undefined,
-				};
+				completedSteps = stepContext.getCompletedSteps();
+				await onComplete?.({ toolCallId, toolName: tool.name, input: params, completedSteps }, toolResult);
+				tracker.executions.delete(toolCallId);
+				return toolResult;
 			}
 		},
 	};
@@ -251,13 +263,14 @@ function convertTool(
  */
 function toolResultToAgentToolResult(result: ToolResult<unknown>): AgentToolResult<unknown> {
 	if (result.status === 'success') {
+		const text =
+			typeof result.output === 'string'
+				? result.output
+				: result.output === undefined
+					? ''
+					: JSON.stringify(result.output, null, 2);
 		return {
-			content: [
-				{
-					type: 'text',
-					text: typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2),
-				},
-			],
+			content: [{ type: 'text', text }],
 			details: result.details,
 		};
 	}

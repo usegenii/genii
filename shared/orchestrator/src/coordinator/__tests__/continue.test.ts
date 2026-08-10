@@ -4,8 +4,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { AdapterCreateConfig, AgentAdapter, AgentInstance } from '../../adapters/types';
+import type { PendingResolution } from '../../events/types';
 import type { GuidanceContext, MemorySystem } from '../../guidance/types';
-import type { AgentCheckpoint, SnapshotStore } from '../../snapshot/types';
+import { type AgentCheckpoint, CHECKPOINT_VERSION, type SnapshotStore } from '../../snapshot/types';
+import { createSuspensionId } from '../../tools/suspension';
 import type { ToolRegistryInterface } from '../../tools/types';
 import type { AgentSessionId } from '../../types/core';
 import { createCoordinator } from '../impl';
@@ -118,6 +120,29 @@ function createMockCheckpoint(sessionId: string): AgentCheckpoint {
 		},
 		toolExecutions: [],
 	};
+}
+
+function createSuspendedCheckpoint(sessionId: AgentSessionId): AgentCheckpoint {
+	const checkpoint = createMockCheckpoint(sessionId);
+	const stepId = '__suspension:event:build:0';
+	const suspensionId = createSuspensionId('tool-call-1', stepId);
+	checkpoint.toolExecutions = [
+		{
+			toolName: 'wait-for-build',
+			toolCallId: 'tool-call-1',
+			input: { sha: 'abc' },
+			completedSteps: [{ stepId: 'create-pr', result: 123, completedAt: 100 }],
+			suspendedStep: {
+				suspensionId,
+				stepId,
+				request: { type: 'event', eventName: 'build.completed', options: { timeout: 5000 } },
+				suspendedAt: 1000,
+				deadline: 6000,
+				status: 'waiting',
+			},
+		},
+	];
+	return checkpoint;
 }
 
 /**
@@ -356,5 +381,140 @@ describe('Coordinator.continue()', () => {
 			expect(capturedConfig?.metadata).toEqual({ custom: 'data' });
 			expect(capturedConfig?.input).toEqual(input);
 		});
+	});
+});
+
+describe('Coordinator durable suspensions', () => {
+	it('enriches and awaits adapter lifecycle checkpoints', async () => {
+		const snapshotStore = createMockSnapshotStore(new Map());
+		const instance = createMockAgentInstance('barrier-session');
+		let capturedConfig: AdapterCreateConfig | undefined;
+		const adapter = createMockAdapter();
+		adapter.create = vi.fn().mockImplementation(async (config: AdapterCreateConfig) => {
+			capturedConfig = config;
+			return instance;
+		});
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+		await coordinator.spawn(adapter, { guidancePath: '/test/guidance' });
+		if (!capturedConfig?.onCheckpoint) throw new Error('Expected checkpoint lifecycle callback');
+
+		await capturedConfig.onCheckpoint(await instance.checkpoint(), 'suspended');
+
+		expect(snapshotStore.save).toHaveBeenCalledWith(
+			expect.objectContaining({
+				version: CHECKPOINT_VERSION,
+				adapterConfig: expect.objectContaining({
+					provider: adapter.modelProvider,
+					model: adapter.modelName,
+				}),
+			}),
+		);
+	});
+
+	it('surfaces lifecycle checkpoint failures to the adapter', async () => {
+		const snapshotStore = createMockSnapshotStore(new Map());
+		vi.mocked(snapshotStore.save).mockRejectedValue(new Error('disk unavailable'));
+		const instance = createMockAgentInstance('barrier-failure-session');
+		let capturedConfig: AdapterCreateConfig | undefined;
+		const adapter = createMockAdapter();
+		adapter.create = vi.fn().mockImplementation(async (config: AdapterCreateConfig) => {
+			capturedConfig = config;
+			return instance;
+		});
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+		await coordinator.spawn(adapter, { guidancePath: '/test/guidance' });
+		if (!capturedConfig?.onCheckpoint) throw new Error('Expected checkpoint lifecycle callback');
+
+		await expect(capturedConfig.onCheckpoint(await instance.checkpoint(), 'suspended')).rejects.toThrow(
+			'disk unavailable',
+		);
+	});
+
+	it('inspects a dormant request without restoring an adapter', async () => {
+		const sessionId = 'dormant-session' as AgentSessionId;
+		const checkpoint = createSuspendedCheckpoint(sessionId);
+		const snapshotStore = createMockSnapshotStore(new Map([[sessionId, checkpoint]]));
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+
+		const requests = await coordinator.getPendingRequests(sessionId);
+
+		expect(requests).toEqual([
+			expect.objectContaining({
+				suspensionId: checkpoint.toolExecutions[0]?.suspendedStep?.suspensionId,
+				toolCallId: 'tool-call-1',
+				stepId: '__suspension:event:build:0',
+				type: 'event',
+				status: 'waiting',
+				deadline: 6000,
+			}),
+		]);
+	});
+
+	it('rejects ordinary continuation while a checkpoint is suspended', async () => {
+		const sessionId = 'waiting-session' as AgentSessionId;
+		const checkpoint = createSuspendedCheckpoint(sessionId);
+		const snapshotStore = createMockSnapshotStore(new Map([[sessionId, checkpoint]]));
+		const adapter = createMockAdapter();
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+
+		await expect(coordinator.continue(sessionId, { message: 'ordinary input' }, adapter)).rejects.toThrow(
+			'waiting for a suspension resolution',
+		);
+		expect(adapter.restore).not.toHaveBeenCalled();
+	});
+
+	it('restores and accepts a dormant resolution without adding user input', async () => {
+		const sessionId = 'resolved-session' as AgentSessionId;
+		const checkpoint = createSuspendedCheckpoint(sessionId);
+		const snapshotStore = createMockSnapshotStore(new Map([[sessionId, checkpoint]]));
+		const tools = createMockToolRegistry();
+		const instance = createMockAgentInstance(sessionId);
+		const adapter = createMockAdapter();
+		adapter.restore = vi.fn().mockImplementation(async (_checkpoint, config: AdapterCreateConfig) => {
+			expect(config.input).toBeUndefined();
+			expect(config.contextInjection).toBeUndefined();
+			expect(config.tools).toBe(tools);
+			return instance;
+		});
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+		const resolution: PendingResolution = {
+			suspensionId: checkpoint.toolExecutions[0]?.suspendedStep
+				?.suspensionId as PendingResolution['suspensionId'],
+			type: 'event',
+			payload: { conclusion: 'success' },
+		};
+
+		const handle = await coordinator.resolveSuspensions(sessionId, [resolution], adapter, { tools });
+
+		expect(handle.id).toBe(sessionId);
+		expect(instance.resolve).toHaveBeenCalledWith([resolution]);
+		expect(adapter.restore).toHaveBeenCalledTimes(1);
+	});
+
+	it('flushes and detaches waiting sessions during shutdown without terminating them', async () => {
+		const sessionId = 'shutdown-session' as AgentSessionId;
+		const snapshotStore = createMockSnapshotStore(new Map());
+		const instance = createMockAgentInstance(sessionId);
+		instance.run = vi.fn().mockReturnValue({
+			[Symbol.asyncIterator]: async function* () {
+				yield { type: 'status' as const, status: 'waiting' as const, timestamp: Date.now() };
+			},
+		});
+		const adapter = createMockAdapter();
+		adapter.create = vi.fn().mockResolvedValue(instance);
+		const coordinator = createCoordinator({ snapshotStore, defaultGuidancePath: '/test/guidance' });
+		await coordinator.start();
+		const handle = await coordinator.spawn(adapter, { guidancePath: '/test/guidance' });
+		await handle.start();
+
+		await coordinator.shutdown({ graceful: true, timeoutMs: 1 });
+
+		expect(snapshotStore.save).toHaveBeenCalled();
+		expect(instance.abort).not.toHaveBeenCalled();
 	});
 });

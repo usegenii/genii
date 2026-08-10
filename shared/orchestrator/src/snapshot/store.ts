@@ -2,10 +2,11 @@
  * Snapshot store implementations.
  */
 
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import type { AgentSessionId } from '../types/core';
-import type { AgentCheckpoint, FileSnapshotStoreOptions, SnapshotStore } from './types';
+import { type AgentCheckpoint, CHECKPOINT_VERSION, type FileSnapshotStoreOptions, type SnapshotStore } from './types';
 
 /**
  * File-based snapshot store.
@@ -14,6 +15,7 @@ import type { AgentCheckpoint, FileSnapshotStoreOptions, SnapshotStore } from '.
 export class FileSnapshotStore implements SnapshotStore {
 	private readonly directory: string;
 	private initialized = false;
+	private readonly pendingSaves = new Map<string, Promise<void>>();
 
 	constructor(options: FileSnapshotStoreOptions) {
 		this.directory = options.directory;
@@ -42,11 +44,40 @@ export class FileSnapshotStore implements SnapshotStore {
 	 * Save a checkpoint.
 	 */
 	async save(checkpoint: AgentCheckpoint): Promise<void> {
-		await this.ensureInitialized();
-
 		const path = this.getPath(checkpoint.session.id);
 		const content = JSON.stringify(checkpoint, null, 2);
-		await writeFile(path, content, 'utf-8');
+		const previousSave = this.pendingSaves.get(path) ?? Promise.resolve();
+		const currentSave = previousSave
+			.catch(() => undefined)
+			.then(async () => {
+				await this.ensureInitialized();
+				await this.replaceFile(path, content);
+			});
+
+		this.pendingSaves.set(path, currentSave);
+
+		try {
+			await currentSave;
+		} finally {
+			if (this.pendingSaves.get(path) === currentSave) {
+				this.pendingSaves.delete(path);
+			}
+		}
+	}
+
+	/**
+	 * Replace a checkpoint without exposing a partially written JSON document.
+	 */
+	private async replaceFile(path: string, content: string): Promise<void> {
+		const temporaryPath = join(this.directory, `.${basename(path)}.${process.pid}-${randomUUID()}.tmp`);
+
+		try {
+			await writeFile(temporaryPath, content, 'utf-8');
+			await rename(temporaryPath, path);
+		} catch (error) {
+			await rm(temporaryPath, { force: true }).catch(() => undefined);
+			throw error;
+		}
 	}
 
 	/**
@@ -57,7 +88,13 @@ export class FileSnapshotStore implements SnapshotStore {
 
 		try {
 			const content = await readFile(path, 'utf-8');
-			return JSON.parse(content) as AgentCheckpoint;
+			const parsed: unknown = JSON.parse(content);
+			const version =
+				typeof parsed === 'object' && parsed !== null ? (parsed as { version?: unknown }).version : undefined;
+			if (version !== undefined && version !== CHECKPOINT_VERSION) {
+				throw new Error(`Unsupported checkpoint version: ${String(version)}`);
+			}
+			return parsed as AgentCheckpoint;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
 				return null;

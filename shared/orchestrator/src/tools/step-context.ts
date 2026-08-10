@@ -2,7 +2,7 @@
  * Step context implementation for durable tool execution.
  */
 
-import { DuplicateStepError, SuspensionError } from './suspension';
+import { DuplicateStepError, SuspensionCancelledError, SuspensionError, SuspensionTimeoutError } from './suspension';
 import type {
 	ApprovalRequest,
 	ApprovalResponse,
@@ -28,13 +28,13 @@ import type {
  * 4. The suspended step receives its resume data
  */
 export class StepContextImpl implements StepContext {
-	private completedSteps: Map<string, unknown>;
+	private completedSteps: Map<string, CompletedStep>;
 	private executedSteps: Set<string>;
 	private resumeData?: StepResumeData;
 	private onEvent?: StepContextOptions['onEvent'];
 
 	constructor(options: StepContextOptions = {}) {
-		this.completedSteps = new Map(options.completedSteps?.map((s) => [s.stepId, s.result]));
+		this.completedSteps = new Map(options.completedSteps?.map((step) => [step.stepId, { ...step }]));
 		this.executedSteps = new Set();
 		this.resumeData = options.resumeData;
 		this.onEvent = options.onEvent;
@@ -54,16 +54,23 @@ export class StepContextImpl implements StepContext {
 
 		// Check if we have a memoized result
 		if (this.completedSteps.has(stepId)) {
-			const result = this.completedSteps.get(stepId) as T;
+			const result = this.completedSteps.get(stepId)?.result as T;
 			this.onEvent?.({ type: 'step_memoized', stepId, result });
 			return result;
 		}
 
 		// Check if this is the step being resumed
 		if (this.resumeData?.stepId === stepId) {
-			const result = this.resumeData.result as T;
+			const outcome = this.resumeData.outcome;
+			if (outcome.type === 'cancelled') {
+				throw new SuspensionCancelledError(stepId, outcome.reason);
+			}
+			if (outcome.type === 'timeout') {
+				throw new SuspensionTimeoutError(stepId);
+			}
+			const result = (outcome.type === 'void' ? undefined : outcome.value) as T;
 			// Store for future memoization
-			this.completedSteps.set(stepId, result);
+			this.completedSteps.set(stepId, { stepId, result, completedAt: Date.now() });
 			this.onEvent?.({ type: 'step_end', stepId, result });
 			// Clear resume data so it's not reused
 			this.resumeData = undefined;
@@ -74,7 +81,7 @@ export class StepContextImpl implements StepContext {
 		this.onEvent?.({ type: 'step_start', stepId });
 
 		const result = await fn();
-		this.completedSteps.set(stepId, result);
+		this.completedSteps.set(stepId, { stepId, result, completedAt: Date.now() });
 		this.onEvent?.({ type: 'step_end', stepId, result });
 		return result;
 	}
@@ -89,7 +96,7 @@ export class StepContextImpl implements StepContext {
 				type: 'user_input',
 				request,
 			};
-			this.onEvent?.({ type: 'suspended', request: suspensionRequest });
+			this.onEvent?.({ type: 'suspended', stepId, request: suspensionRequest });
 			throw new SuspensionError(stepId, suspensionRequest);
 		});
 	}
@@ -104,7 +111,7 @@ export class StepContextImpl implements StepContext {
 				type: 'approval',
 				request,
 			};
-			this.onEvent?.({ type: 'suspended', request: suspensionRequest });
+			this.onEvent?.({ type: 'suspended', stepId, request: suspensionRequest });
 			throw new SuspensionError(stepId, suspensionRequest);
 		});
 	}
@@ -120,7 +127,7 @@ export class StepContextImpl implements StepContext {
 				eventName,
 				options,
 			};
-			this.onEvent?.({ type: 'suspended', request: suspensionRequest });
+			this.onEvent?.({ type: 'suspended', stepId, request: suspensionRequest });
 			throw new SuspensionError(stepId, suspensionRequest);
 		});
 	}
@@ -136,7 +143,7 @@ export class StepContextImpl implements StepContext {
 				durationMs: ms,
 				wakeAt: Date.now() + ms,
 			};
-			this.onEvent?.({ type: 'suspended', request: suspensionRequest });
+			this.onEvent?.({ type: 'suspended', stepId, request: suspensionRequest });
 			throw new SuspensionError(stepId, suspensionRequest);
 		});
 	}
@@ -153,11 +160,7 @@ export class StepContextImpl implements StepContext {
 	 * Get the list of completed steps for checkpointing.
 	 */
 	getCompletedSteps(): CompletedStep[] {
-		return [...this.completedSteps.entries()].map(([stepId, result]) => ({
-			stepId,
-			result,
-			completedAt: Date.now(),
-		}));
+		return [...this.completedSteps.values()].map((step) => ({ ...step }));
 	}
 
 	/**
@@ -171,7 +174,7 @@ export class StepContextImpl implements StepContext {
 	 * Get the result of a completed step.
 	 */
 	getCompletedStepResult<T>(stepId: string): T | undefined {
-		return this.completedSteps.get(stepId) as T | undefined;
+		return this.completedSteps.get(stepId)?.result as T | undefined;
 	}
 }
 
