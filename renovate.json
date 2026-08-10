@@ -9,6 +9,11 @@
 	"automergeStrategy": "auto",
 	"packageRules": [
 		{
+			"description": "Do not apply release-age checks to pin updates",
+			"matchUpdateTypes": ["pin"],
+			"minimumReleaseAge": null
+		},
+		{
 			"description": "Auto-merge patch updates",
 			"matchUpdateTypes": ["patch"],
 			"automerge": true
