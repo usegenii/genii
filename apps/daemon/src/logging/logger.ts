@@ -9,8 +9,11 @@
  */
 
 import { join } from 'node:path';
+import { format } from 'node:util';
+import type { RpcJsonObject, RpcJsonValue } from '@genii/lib/rpc/methods';
 import type { TransportTargetOptions } from 'pino';
 import pino from 'pino';
+import type { LogBuffer, PendingLogEntry } from './buffer';
 
 /**
  * Log level.
@@ -29,12 +32,146 @@ export interface LoggerConfig {
 	logDir?: string;
 	/** Base context to include in all logs */
 	context?: Record<string, unknown>;
+	/** In-process replay buffer for RPC log subscriptions */
+	logBuffer?: LogBuffer;
 }
 
 /**
  * Logger instance. Re-exported from pino for full API compatibility.
  */
 export type Logger = pino.Logger;
+
+interface LogCaptureState {
+	buffer: LogBuffer;
+	inProgress: boolean;
+}
+
+const LOG_METHOD_LEVELS: Readonly<Record<string, LogLevel>> = {
+	trace: 'trace',
+	debug: 'debug',
+	info: 'info',
+	warn: 'warn',
+	error: 'error',
+	fatal: 'fatal',
+};
+
+const attachedLogBuffers = new WeakMap<Logger, LogBuffer>();
+
+function serializeLogData(value: unknown): RpcJsonObject | undefined {
+	if (typeof value !== 'object' || value === null) {
+		return undefined;
+	}
+
+	try {
+		const seen = new WeakSet<object>();
+		const serialized = JSON.stringify(value, (_key, nestedValue: unknown) => {
+			if (nestedValue instanceof Error) {
+				return {
+					name: nestedValue.name,
+					message: nestedValue.message,
+					stack: nestedValue.stack,
+				};
+			}
+			if (typeof nestedValue === 'bigint') {
+				return nestedValue.toString();
+			}
+			if (typeof nestedValue === 'object' && nestedValue !== null) {
+				if (seen.has(nestedValue)) {
+					return '[Circular]';
+				}
+				seen.add(nestedValue);
+			}
+			return nestedValue;
+		});
+		if (!serialized) {
+			return undefined;
+		}
+		const parsed = JSON.parse(serialized) as RpcJsonValue;
+		return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : { value: parsed };
+	} catch {
+		try {
+			return { value: String(value) };
+		} catch {
+			return { value: '[Unserializable]' };
+		}
+	}
+}
+
+function normalizeLogCall(args: unknown[], level: LogLevel, bindings: pino.Bindings): PendingLogEntry {
+	const [first, second, ...rest] = args;
+	const data = serializeLogData(first);
+	let message: string;
+
+	if (typeof first === 'string') {
+		message = format(first, ...args.slice(1));
+	} else if (typeof second === 'string') {
+		message = format(second, ...rest);
+	} else if (first instanceof Error) {
+		message = first.message;
+	} else {
+		message = format(first);
+	}
+
+	const componentValue = data?.component ?? bindings.component;
+	return {
+		timestamp: Date.now(),
+		level,
+		message,
+		...(typeof componentValue === 'string' ? { component: componentValue } : {}),
+		...(data ? { data } : {}),
+	};
+}
+
+function wrapLoggerWithBuffer(logger: Logger, state: LogCaptureState): Logger {
+	const wrapped = new Proxy(logger, {
+		get(target, property) {
+			if (property === 'child') {
+				const createChild = target.child.bind(target) as unknown as (
+					bindings: pino.Bindings,
+					options?: pino.ChildLoggerOptions,
+				) => Logger;
+				return (bindings: pino.Bindings, options?: pino.ChildLoggerOptions) =>
+					wrapLoggerWithBuffer(createChild(bindings, options), state);
+			}
+
+			const level = typeof property === 'string' ? LOG_METHOD_LEVELS[property] : undefined;
+			if (level) {
+				const method = Reflect.get(target, property, target) as pino.LogFn;
+				return (...args: Parameters<pino.LogFn>) => {
+					if (!state.inProgress && target.isLevelEnabled(level)) {
+						state.inProgress = true;
+						try {
+							state.buffer.append(normalizeLogCall(args as unknown[], level, target.bindings()));
+						} finally {
+							state.inProgress = false;
+						}
+					}
+					method.apply(target, args);
+				};
+			}
+
+			const value = Reflect.get(target, property, target) as unknown;
+			return typeof value === 'function' ? value.bind(target) : value;
+		},
+	});
+
+	attachedLogBuffers.set(wrapped, state.buffer);
+	return wrapped;
+}
+
+/**
+ * Attach a replay buffer to an existing logger and all child loggers it creates.
+ *
+ * The wrapper preserves the logger's configured level, so disabled calls are not
+ * added to the replay stream. Attaching the same buffer more than once is a no-op.
+ */
+export function attachLogBuffer(logger: Logger, buffer: LogBuffer): Logger {
+	if (attachedLogBuffers.get(logger) === buffer) {
+		return logger;
+	}
+
+	return wrapLoggerWithBuffer(logger, { buffer, inProgress: false });
+}
 
 /**
  * Create a logger instance.
@@ -90,14 +227,15 @@ export function createLogger(config: Partial<LoggerConfig> = {}): Logger {
 	}
 
 	// No transports configured — use default pino (JSON to stdout)
-	if (targets.length === 0) {
-		return pino(pinoOpts);
-	}
+	const logger =
+		targets.length === 0
+			? pino(pinoOpts)
+			: pino({
+					...pinoOpts,
+					transport: targets.length === 1 ? targets[0] : { targets },
+				});
 
-	return pino({
-		...pinoOpts,
-		transport: targets.length === 1 ? targets[0] : { targets },
-	});
+	return config.logBuffer ? attachLogBuffer(logger, config.logBuffer) : logger;
 }
 
 /**

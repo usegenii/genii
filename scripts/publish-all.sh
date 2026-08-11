@@ -141,6 +141,7 @@ publish_package() {
                 '@genii/comms': 'shared/comms',
                 '@genii/orchestrator': 'shared/orchestrator',
                 '@genii/guidance': 'shared/guidance',
+                '@genii/lib': 'shared/lib',
                 '@genii/models': 'shared/models',
                 '@genii/cli': 'apps/cli',
                 '@genii/daemon': 'apps/daemon'
@@ -172,13 +173,13 @@ publish_package() {
 }
 
 echo "=== Step 1: Publishing shared packages (no internal deps) ==="
-publish_package "shared/lib" "@genii/lib"
 publish_package "shared/config" "@genii/config"
 publish_package "shared/comms" "@genii/comms"
 publish_package "shared/orchestrator" "@genii/orchestrator"
 publish_package "shared/guidance" "@genii/guidance"
 
-echo "=== Step 2: Publishing models (depends on config + orchestrator) ==="
+echo "=== Step 2: Publishing dependent shared packages ==="
+publish_package "shared/lib" "@genii/lib"
 publish_package "shared/models" "@genii/models"
 
 echo "=== Step 3: Publishing apps ==="

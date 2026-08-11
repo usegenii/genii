@@ -39,6 +39,12 @@ The daemon is both the control plane and the conversation plane:
 Agent sessions are concurrent logical state machines inside the daemon. They are not separate services, containers,
 or operating-system processes.
 
+Control-plane observations use connection-owned subscriptions. Agent output and structured daemon logs are retained in
+bounded, in-memory journals so a client can replay recent records and then follow new records on the same subscription.
+The daemon installs the live subscription before taking the replay snapshot; sequence numbers let clients merge the
+intentional overlap without duplicates or a replay-to-live gap. Closing a local IPC connection releases only that
+connection's subscriptions. The journals are operational buffers rather than durable state and reset with the daemon.
+
 ## Core concepts
 
 | Concept | Architectural meaning |

@@ -3,6 +3,8 @@
  * @module commands/daemon/logs
  */
 
+import type { LogEntry, RpcLogLevel, RpcMethods } from '@genii/lib/rpc/methods';
+import type { RpcNotificationParams } from '@genii/lib/rpc/notifications';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
@@ -29,40 +31,45 @@ const LEVEL_COLORS: Record<string, (text: string) => string> = {
 	fatal: chalk.bgRed.white,
 };
 
+const LOG_LEVELS: RpcLogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+
+function parseLogLevel(level: string | undefined): RpcLogLevel | undefined {
+	if (level === undefined) {
+		return undefined;
+	}
+	if (!LOG_LEVELS.includes(level as RpcLogLevel)) {
+		throw new Error(`Invalid log level: ${level}. Valid levels: ${LOG_LEVELS.join(', ')}`);
+	}
+	return level as RpcLogLevel;
+}
+
+function parseLineCount(lines: string | undefined): number {
+	const count = Number.parseInt(lines ?? '50', 10);
+	if (!Number.isSafeInteger(count) || count < 0) {
+		throw new Error(`Invalid line count: ${lines ?? ''}`);
+	}
+	return count;
+}
+
+function orderAndDedupeEntries(entries: LogEntry[]): LogEntry[] {
+	const bySequence = new Map<number, LogEntry>();
+	for (const entry of entries) {
+		bySequence.set(entry.sequence, entry);
+	}
+	return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence);
+}
+
 /**
  * Format a log entry for human-readable output.
  */
 function formatLogEntry(entry: LogEntry): string {
-	// Convert string timestamp to Date or number
-	const ts = typeof entry.timestamp === 'string' ? new Date(entry.timestamp) : entry.timestamp;
-	const timestamp = chalk.gray(formatTimestamp(ts));
+	const timestamp = chalk.gray(formatTimestamp(entry.timestamp));
 	const levelColor = LEVEL_COLORS[entry.level] ?? chalk.white;
 	const level = levelColor(entry.level.toUpperCase().padEnd(5));
 	const component = entry.component ? chalk.cyan(`[${entry.component}]`) : '';
 	const message = entry.message;
 
 	return `${timestamp} ${level} ${component} ${message}`.trim();
-}
-
-/**
- * Log entry structure from daemon.
- */
-interface LogEntry {
-	timestamp: string | number;
-	level: string;
-	component?: string;
-	message: string;
-	data?: unknown;
-}
-
-/**
- * Filter for log subscriptions.
- */
-interface LogFilter {
-	level?: string;
-	component?: string;
-	since?: string;
-	limit?: number;
 }
 
 /**
@@ -83,6 +90,43 @@ export function logsCommand(daemon: Command): void {
 			const formatter = getFormatter(format);
 
 			const client = createDaemonClient();
+			let subscriptionId: string | null = null;
+			let unsubscribeNotification: (() => void) | null = null;
+			let signalHandler: (() => void) | null = null;
+			let cleanupPromise: Promise<void> | null = null;
+			let resolveStop: () => void = () => {};
+			const stopped = new Promise<void>((resolve) => {
+				resolveStop = resolve;
+			});
+
+			const cleanup = (): Promise<void> => {
+				if (cleanupPromise) {
+					return cleanupPromise;
+				}
+
+				cleanupPromise = (async () => {
+					if (signalHandler) {
+						process.off('SIGINT', signalHandler);
+						process.off('SIGTERM', signalHandler);
+					}
+					unsubscribeNotification?.();
+					unsubscribeNotification = null;
+					if (subscriptionId && client.connected) {
+						try {
+							await client.unsubscribe(subscriptionId);
+						} catch {
+							// Ignore cleanup races with disconnect or daemon shutdown.
+						}
+					}
+					await client.disconnect();
+				})();
+
+				return cleanupPromise;
+			};
+
+			signalHandler = resolveStop;
+			process.on('SIGINT', signalHandler);
+			process.on('SIGTERM', signalHandler);
 
 			try {
 				await client.connect();
@@ -92,95 +136,68 @@ export function logsCommand(daemon: Command): void {
 			}
 
 			try {
-				const filter: LogFilter = {
-					level: options.level,
+				const request: RpcMethods['subscribe.logs'] = {
+					level: parseLogLevel(options.level),
 					component: options.component,
 					since: options.since,
-					limit: parseInt(options.lines ?? '50', 10),
+					limit: parseLineCount(options.lines),
+					follow: options.follow ?? false,
+				};
+				const bufferedNotifications: RpcNotificationParams['logs.entry'][] = [];
+				let lastSequence = -1;
+				let replaying = true;
+
+				const writeFollowEntry = (entry: LogEntry): void => {
+					if (entry.sequence <= lastSequence) {
+						return;
+					}
+					lastSequence = entry.sequence;
+
+					if (format === 'json') {
+						console.log(JSON.stringify(entry));
+					} else if (format === 'quiet') {
+						console.log(entry.message);
+					} else {
+						console.log(formatLogEntry(entry));
+					}
 				};
 
+				unsubscribeNotification = client.onNotification((notification) => {
+					if (notification.method !== 'logs.entry') {
+						return;
+					}
+					if (subscriptionId === null || replaying) {
+						bufferedNotifications.push(notification.params);
+						return;
+					}
+					if (notification.params.subscriptionId !== subscriptionId) {
+						return;
+					}
+					writeFollowEntry(notification.params.entry);
+				});
+
+				const result = await client.subscribeLogs(request);
+				subscriptionId = result.subscriptionId;
+
 				if (options.follow) {
-					// Subscribe to log notifications
-					const subscriptionId = await client.subscribe('logs', filter);
-
-					// Set up notification handler
-					const unsubscribe = client.onNotification((method, params) => {
-						if (method === 'log') {
-							const entry = params as LogEntry;
-
-							if (format === 'json') {
-								console.log(JSON.stringify(entry));
-							} else if (format === 'quiet') {
-								console.log(entry.message);
-							} else {
-								console.log(formatLogEntry(entry));
-							}
-						}
-					});
-
 					// Show initial message
 					if (format === 'human') {
 						formatter.message('Following daemon logs (Ctrl+C to exit)', 'info');
 						console.log('');
 					}
 
-					// Handle Ctrl+C
-					process.on('SIGINT', async () => {
-						unsubscribe();
-						try {
-							await client.unsubscribe(subscriptionId);
-						} catch {
-							// Ignore errors during cleanup
-						}
-						await client.disconnect();
-						process.exit(0);
-					});
-
-					// Keep the process running
-					await new Promise(() => {});
-				} else {
-					// Single request for recent logs
-					// This would typically be a separate RPC method like 'logs.recent'
-					// For now, we'll subscribe briefly and then unsubscribe
-
-					const entries: LogEntry[] = [];
-					const limit = parseInt(options.lines ?? '50', 10);
-
-					// Subscribe to get initial logs
-					const subscriptionId = await client.subscribe('logs', {
-						...filter,
-						limit,
-						includeRecent: true,
-					});
-
-					// Collect entries with a timeout
-					const collectPromise = new Promise<void>((resolve) => {
-						const timeout = setTimeout(resolve, 2000);
-
-						const unsubscribe = client.onNotification((method, params) => {
-							if (method === 'log' || method === 'logs.entry') {
-								entries.push(params as LogEntry);
-								if (entries.length >= limit) {
-									clearTimeout(timeout);
-									unsubscribe();
-									resolve();
-								}
-							} else if (method === 'logs.complete') {
-								clearTimeout(timeout);
-								unsubscribe();
-								resolve();
-							}
-						});
-					});
-
-					await collectPromise;
-
-					// Unsubscribe
-					try {
-						await client.unsubscribe(subscriptionId);
-					} catch {
-						// Ignore errors
+					const bufferedForSubscription = bufferedNotifications
+						.filter((notification) => notification.subscriptionId === subscriptionId)
+						.map((notification) => notification.entry);
+					bufferedNotifications.length = 0;
+					for (const entry of orderAndDedupeEntries([...result.entries, ...bufferedForSubscription])) {
+						writeFollowEntry(entry);
 					}
+					replaying = false;
+					await stopped;
+				} else {
+					replaying = false;
+					const entries = orderAndDedupeEntries(result.entries);
 
 					// Display collected logs
 					if (entries.length === 0) {
@@ -202,11 +219,10 @@ export function logsCommand(daemon: Command): void {
 							}
 						}
 					}
-
-					await client.disconnect();
 				}
+				await cleanup();
 			} catch (error) {
-				await client.disconnect();
+				await cleanup();
 				formatter.error(error instanceof Error ? error : new Error(String(error)));
 				process.exit(1);
 			}

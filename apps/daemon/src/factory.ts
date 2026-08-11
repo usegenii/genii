@@ -35,10 +35,13 @@ import { setupCommandSystem } from './commands/setup';
 import { ConversationManager } from './conversations/manager';
 import { createFileConversationStore } from './conversations/store';
 import { type Daemon, type DaemonConfig, DaemonImpl } from './daemon';
-import { createLogger, type Logger, type LogLevel } from './logging/logger';
+import { createLogBuffer, type LogBuffer } from './logging/buffer';
+import { attachLogBuffer, createLogger, type Logger, type LogLevel } from './logging/logger';
 import { resolveDefaultModel } from './models/resolve';
 import { createMessageRouter, type MessageRouterConfig } from './router/router';
+import { type AgentEventJournal, createAgentEventJournal } from './rpc/event-journal';
 import { createHandlers, type DaemonRuntimeConfig } from './rpc/handlers';
+import { createRuntimePublisher } from './rpc/runtime-publisher';
 import { createRpcServer, type RpcServer } from './rpc/server';
 import { createSubscriptionManager } from './rpc/subscriptions';
 import { createDestinationResolver } from './scheduler/destination-resolver';
@@ -72,6 +75,10 @@ export interface CreateDaemonOptions {
 	channelRegistry?: ChannelRegistry;
 	/** Loaded configuration */
 	config?: Config;
+	/** Shared logger, used by the normal daemon entry point and all subsystems */
+	logger?: Logger;
+	/** Replay buffer attached to the shared logger */
+	logBuffer?: LogBuffer;
 }
 
 /**
@@ -130,6 +137,8 @@ interface CreateRpcServerDepsConfig {
 	conversationManager: ConversationManager;
 	shutdownManager: ShutdownManager;
 	logger: Logger;
+	logBuffer: LogBuffer;
+	agentEvents: AgentEventJournal;
 	modelFactory?: ModelFactory;
 	appConfig?: Config;
 	toolRegistry?: ToolRegistryInterface;
@@ -150,6 +159,14 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 	const subscriptionManager = createSubscriptionManager({
 		logger: deps.logger,
 		getConnection: (connectionId) => connections.get(connectionId),
+		agentEvents: deps.agentEvents,
+		logs: deps.logBuffer,
+	});
+	const runtimePublisher = createRuntimePublisher({
+		coordinator: deps.coordinator,
+		agentEvents: deps.agentEvents,
+		logs: deps.logBuffer,
+		subscriptionManager,
 	});
 
 	// Create base handler context (without connection - added per-request)
@@ -176,6 +193,8 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		handlerContext,
 		handlers,
 		subscriptionManager,
+		connections,
+		runtimePublisher,
 		logger: deps.logger,
 	});
 
@@ -215,8 +234,13 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		logLevel,
 	};
 
-	// Create logger (file output only when logDir is explicitly provided)
-	const logger = createLogger({ level: logLevel, logDir: options.logDir });
+	const logBuffer = options.logBuffer ?? createLogBuffer();
+	// Create or instrument the shared logger so daemon-originated logs always reach RPC subscribers.
+	const logger = attachLogBuffer(
+		options.logger ?? createLogger({ level: logLevel, logDir: options.logDir }),
+		logBuffer,
+	);
+	const agentEvents = createAgentEventJournal();
 
 	// Resolve guidance path early so we can log it
 	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
@@ -375,6 +399,8 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
 		conversationManager,
 		shutdownManager,
 		logger,
+		logBuffer,
+		agentEvents,
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
 		toolRegistry,
@@ -400,8 +426,6 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
  * Extended options for creating a daemon with custom subsystems.
  */
 export interface CreateDaemonWithDepsOptions extends CreateDaemonOptions {
-	/** Custom logger instance */
-	logger?: Logger;
 	/** Custom coordinator instance */
 	coordinator?: Coordinator;
 	/** Custom channel registry instance */
@@ -431,8 +455,13 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		logLevel,
 	};
 
-	// Use provided logger or create one (file output only when logDir is explicitly provided)
-	const logger = options.logger ?? createLogger({ level: logLevel, logDir: options.logDir });
+	const logBuffer = options.logBuffer ?? createLogBuffer();
+	// Use and instrument the shared logger so custom dependencies retain the same log stream.
+	const logger = attachLogBuffer(
+		options.logger ?? createLogger({ level: logLevel, logDir: options.logDir }),
+		logBuffer,
+	);
+	const agentEvents = createAgentEventJournal();
 
 	// Resolve guidance path early so we can log it
 	const guidancePath = options.guidancePath ?? join(dataPath, 'guidance');
@@ -592,6 +621,8 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 		conversationManager,
 		shutdownManager,
 		logger,
+		logBuffer,
+		agentEvents,
 		modelFactory: options.modelFactory,
 		appConfig: options.config,
 		toolRegistry,

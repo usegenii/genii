@@ -41,6 +41,7 @@
 	"packageManager": "pnpm@11.20.0",
 	"dependencies": {
 		"@genii/config": "workspace:*",
+		"@genii/lib": "workspace:*",
 		"chalk": "5.6.2",
 		"cli-table3": "0.6.5",
 		"commander": "12.1.0",

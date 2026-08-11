@@ -34,6 +34,10 @@
 		"url": "https://github.com/usegenii/genii"
 	},
 	"packageManager": "pnpm@11.20.0",
+	"dependencies": {
+		"@genii/comms": "workspace:*",
+		"@genii/orchestrator": "workspace:*"
+	},
 	"devDependencies": {
 		"tsup": "8.5.1",
 		"typescript": "5.9.3"

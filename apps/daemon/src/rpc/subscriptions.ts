@@ -8,8 +8,11 @@
  * - Automatic cleanup on connection close
  */
 
+import type { AgentOutputRecord, LogEntry, RpcMethods } from '@genii/lib/rpc/methods';
+import { createLogBuffer, type LogBuffer, matchesLogFilter } from '../logging/buffer';
 import type { Logger } from '../logging/logger';
 import type { RpcNotification, TransportConnection } from '../transport/types';
+import { type AgentEventJournal, createAgentEventJournal } from './event-journal';
 
 /**
  * Types of subscriptions supported.
@@ -70,14 +73,17 @@ export interface SubscriptionManager {
 	 */
 	get(subscriptionId: string): Subscription | undefined;
 
-	/**
-	 * Notify all subscribers of a specific type.
-	 *
-	 * @param type - Type of subscription to notify
-	 * @param data - Data to include in the notification
-	 * @param filter - Optional function to filter which subscriptions to notify
-	 */
-	notify(type: SubscriptionType, data: unknown, filter?: (sub: Subscription) => boolean): void;
+	/** Notify only subscriptions for the agent contained in the record. */
+	notifyAgentOutput(record: AgentOutputRecord): void;
+
+	/** Notify log subscriptions whose live filters match the entry. */
+	notifyLog(entry: LogEntry): void;
+
+	/** Get retained output for an agent before switching to live notifications. */
+	getAgentEvents(agentId: AgentOutputRecord['agentId']): AgentOutputRecord[];
+
+	/** Get retained daemon logs matching the subscription request. */
+	getLogEntries(filter: RpcMethods['subscribe.logs']): LogEntry[];
 
 	/**
 	 * Clean up all subscriptions for a connection.
@@ -100,6 +106,10 @@ export interface SubscriptionManagerConfig {
 	logger: Logger;
 	/** Function to get a connection by ID for sending notifications */
 	getConnection: (connectionId: string) => TransportConnection | undefined;
+	/** Shared retained agent event journal */
+	agentEvents?: AgentEventJournal;
+	/** Shared retained daemon log buffer */
+	logs?: LogBuffer;
 }
 
 /**
@@ -108,6 +118,8 @@ export interface SubscriptionManagerConfig {
 class SubscriptionManagerImpl implements SubscriptionManager {
 	private readonly _logger: Logger;
 	private readonly _getConnection: (connectionId: string) => TransportConnection | undefined;
+	private readonly _agentEvents: AgentEventJournal;
+	private readonly _logs: LogBuffer;
 
 	/** All subscriptions by ID */
 	private readonly _subscriptions: Map<string, Subscription> = new Map();
@@ -124,6 +136,8 @@ class SubscriptionManagerImpl implements SubscriptionManager {
 	constructor(config: SubscriptionManagerConfig) {
 		this._logger = config.logger.child({ component: 'SubscriptionManager' });
 		this._getConnection = config.getConnection;
+		this._agentEvents = config.agentEvents ?? createAgentEventJournal();
+		this._logs = config.logs ?? createLogBuffer();
 
 		// Initialize type maps
 		for (const type of ['agents', 'agent.output', 'channels', 'logs'] as SubscriptionType[]) {
@@ -199,45 +213,74 @@ class SubscriptionManagerImpl implements SubscriptionManager {
 		return this._subscriptions.get(subscriptionId);
 	}
 
-	notify(type: SubscriptionType, data: unknown, filterFn?: (sub: Subscription) => boolean): void {
-		const typeSubs = this._byType.get(type);
+	notifyAgentOutput(record: AgentOutputRecord): void {
+		const typeSubs = this._byType.get('agent.output');
 		if (!typeSubs || typeSubs.size === 0) {
 			return;
 		}
 
-		const notification: RpcNotification = {
-			method: `subscription.${type}`,
-			params: data,
-		};
-
-		let notified = 0;
 		for (const subId of typeSubs) {
 			const subscription = this._subscriptions.get(subId);
 			if (!subscription) {
 				continue;
 			}
-
-			// Apply filter if provided
-			if (filterFn && !filterFn(subscription)) {
+			const filter = subscription.filter as { agentId?: unknown } | undefined;
+			if (filter?.agentId !== record.agentId) {
 				continue;
 			}
 
-			// Get the connection and send notification
 			const connection = this._getConnection(subscription.connectionId);
 			if (connection) {
 				try {
+					const notification: RpcNotification = {
+						method: 'agent.output',
+						params: { subscriptionId: subId, ...record },
+					};
 					connection.notify(notification);
-					notified++;
-				} catch (error) {
-					this._logger.warn(
-						{ error, subscriptionId: subId, connectionId: subscription.connectionId },
-						'Failed to send notification',
-					);
+				} catch {
+					// Connection lifecycle cleanup owns removal; never log from publication paths.
 				}
 			}
 		}
+	}
 
-		this._logger.debug({ type, notified, total: typeSubs.size }, 'Sent notifications');
+	notifyLog(entry: LogEntry): void {
+		const typeSubs = this._byType.get('logs');
+		if (!typeSubs || typeSubs.size === 0) {
+			return;
+		}
+
+		for (const subId of typeSubs) {
+			const subscription = this._subscriptions.get(subId);
+			if (!subscription) {
+				continue;
+			}
+			const filter = (subscription.filter ?? {}) as RpcMethods['subscribe.logs'];
+			if (filter.follow !== true || !matchesLogFilter(entry, filter)) {
+				continue;
+			}
+
+			const connection = this._getConnection(subscription.connectionId);
+			if (connection) {
+				try {
+					const notification: RpcNotification = {
+						method: 'logs.entry',
+						params: { subscriptionId: subId, entry },
+					};
+					connection.notify(notification);
+				} catch {
+					// Connection lifecycle cleanup owns removal; never log from publication paths.
+				}
+			}
+		}
+	}
+
+	getAgentEvents(agentId: AgentOutputRecord['agentId']): AgentOutputRecord[] {
+		return this._agentEvents.recent(agentId);
+	}
+
+	getLogEntries(filter: RpcMethods['subscribe.logs']): LogEntry[] {
+		return this._logs.recent(filter);
 	}
 
 	cleanup(connectionId: string): void {

@@ -3,6 +3,7 @@
  * @module tui/views/logs
  */
 
+import type { RpcLogLevel } from '@genii/lib/rpc/methods';
 import { Box, Text } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
@@ -16,7 +17,7 @@ import { useKeyboard } from '../hooks/use-keyboard';
 interface LogEntry {
 	id: string;
 	timestamp: string;
-	level: 'debug' | 'info' | 'warn' | 'error';
+	level: RpcLogLevel;
 	message: string;
 	source?: string;
 }
@@ -74,22 +75,15 @@ export function Logs(): React.ReactElement {
 				setConnected(true);
 
 				// Subscribe to log notifications
-				unsubscribe = client.onNotification((method, params) => {
-					if (method === 'log' || method === 'daemon.log') {
-						const logParams = params as {
-							level?: string;
-							message?: string;
-							source?: string;
-							timestamp?: string;
-						};
-
-						const level = (logParams.level ?? 'info') as LogEntry['level'];
+				unsubscribe = client.onNotification((notification) => {
+					if (notification.method === 'logs.entry') {
+						const { entry } = notification.params;
 						const newLog: LogEntry = {
-							id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-							timestamp: logParams.timestamp ?? formatTimestamp(Date.now()),
-							level,
-							message: logParams.message ?? '',
-							source: logParams.source,
+							id: String(entry.sequence),
+							timestamp: formatTimestamp(entry.timestamp),
+							level: entry.level,
+							message: entry.message,
+							source: entry.component,
 						};
 
 						setLogs((prev) => [...prev, newLog].slice(-500)); // Keep last 500 logs
