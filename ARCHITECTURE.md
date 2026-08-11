@@ -55,7 +55,7 @@ connection's subscriptions. The journals are operational buffers rather than dur
 | **Agent session** | The stable execution identity and history for reactive or proactive work. A conversation may bind one; a session may finish a turn and later resume. |
 | **Guidance** | Owner-authored context defining identity, behavior, task recipes, skills, time context, and proactive-work policy. |
 | **Memory** | Owner- and agent-maintained learned or working context that is retained across otherwise independent sessions. |
-| **Checkpoint** | A versioned, provider-neutral record of session history and metadata. It also records an active durable tool wait, its completed steps, and any accepted resolution so the exact invocation can replay after restart. |
+| **Checkpoint** | A versioned, provider-neutral record of session history and metadata. It also records an active tool-call batch as per-call durable state, including completed steps, exact waits, accepted resolutions, and completed results, so partially completed parallel work can recover after restart. |
 | **Pulse** | An optional scheduled session for proactive work. It shares normal guidance and capabilities but is independent of any reactive conversation session. |
 
 The current external messaging integration is Telegram. The channel contract is intentionally platform-neutral so
@@ -68,17 +68,21 @@ additional integrations can preserve the same routing and session semantics.
 1. A channel authenticates and filters an external update, then converts it into a normalized event with an opaque
    origin destination.
 2. The daemon handles in-channel commands directly or converts conversational events into agent input.
-3. The destination's conversation binding selects a session.
+3. Events for one destination are routed in arrival order, while independent destinations may proceed concurrently.
+   The destination's conversation binding then selects a session.
 4. If no session is bound, Genii creates and binds one before execution starts. A live session receives follow-up
    input directly. A completed or post-restart session resumes from its checkpoint. Ordinary input is rejected with
    an explicit response while the bound session has a durable tool wait.
-5. The agent combines its history, current guidance, selected model, and available tools to execute the turn.
+5. The agent combines its history, current guidance, selected model, and available tools to execute the turn. Tool
+   calls emitted together may run concurrently, but their results retain the assistant message's source order.
 6. Status, tool activity, streamed output, final responses, and errors become semantic outbound intents. The channel
    decides how those intents appear on its platform.
 7. The binding remains after the turn so later messages retain continuity. Starting over explicitly replaces the
    bound session for that destination.
 
 Binding before execution is an important invariant: even the earliest agent output always has a destination.
+Per-destination routing order is another: restart recovery, binding changes, and subsequent input cannot fork the
+same conversation into overlapping session mutations.
 
 ### Proactive work
 
@@ -94,26 +98,54 @@ Continuity is split into layers with different responsibilities:
 
 - **Conversation bindings** preserve where replies belong and which session should handle the next message.
 - **Session checkpoints** preserve completed-turn history and session metadata across later turns and daemon restarts.
-  At a durable tool wait, they additionally preserve the exact tool call, input, completed steps, request, deadline,
-  and accepted resolution so the invocation can replay without a synthetic user turn.
+  During a durable tool-call batch, they additionally preserve independent state for each call under its stable
+  tool-call identity: input, completed steps, exact wait, deadline, accepted resolution, and any completed result.
+  This lets recovery reuse finished siblings and replay only unfinished invocations without a synthetic user turn.
 - **Guidance** preserves the owner-authored identity, policies, and reusable capabilities applied to sessions.
 - **Memory** preserves learned context and working state across otherwise independent sessions.
 
 Recovery is lazy. On startup, Genii restores persisted routing state but does not eagerly resume every prior session.
 New input resumes a completed bound session from its checkpoint. A dormant wait remains dormant until the control
-plane inspects or resolves it; inspection does not instantiate the model. If no usable checkpoint exists, the daemon
-starts a fresh session and repairs the binding.
+plane inspects or resolves it; inspection does not instantiate the model. If the last checkpoint instead records a
+committed batch whose model continuation is pending, routing recovers that continuation before processing the new
+input as a separate turn. If the recovered continuation reaches a new durable wait, that wait replaces the completed
+batch marker and remains bound to the conversation; the triggering input is not added to history and receives the
+ordinary waiting response. If no usable checkpoint exists, the daemon starts a fresh session and repairs the binding.
 
-Completed turns are checkpointed, and durable-wait transitions add stricter barriers: the wait is persisted before it
-is published, an accepted resolution is persisted before it is acknowledged, and the real tool result is persisted
-before model execution continues. Checkpoint files and conversation bindings use atomic replacement, and binding
-changes are persisted when they occur. Other in-flight model or tool work is not transactional and may be lost after
-an abrupt process failure. Delivery and arbitrary post-resume side effects remain at-least-once rather than
-exactly-once. These stores favor inspectable, local state over distributed coordination or high availability.
+Completed turns are checkpointed, and durable tool lifecycle transitions add stricter barriers: a wait is persisted
+before it is published, an accepted resolution is persisted before it is acknowledged, and completed results are
+persisted before model execution continues. Lifecycle mutations and checkpoint writes are serialized within each
+session so concurrent calls cannot overwrite one another or let an older snapshot replace a newer state. Checkpoint
+files and conversation bindings use atomic replacement, and binding changes are persisted when they occur.
 
-Durable waits are resolved explicitly through the control plane. One tool invocation may be suspended per session;
-sequential waits in that invocation are supported. See [Durable suspensions](docs/durable-suspensions.md) for the tool
-and RPC contracts.
+The persistence model names both deferred recovery boundaries. A batch-pending checkpoint means the durable tool
+batch still has unfinished calls, including the case where a suspended call has completed but an ordinary sibling has
+not. A continuation-pending checkpoint means every per-call result is committed in source order and one model
+continuation remains. These records stay durable until a subsequent checkpoint records that model turn, so recovery
+can finish a partial batch or issue one continuation without replaying completed tools. Provider inference itself is
+at-least-once if a process fails after the provider accepts that request but before the following checkpoint commits.
+A recovered continuation may itself begin another durable batch; reaching its fully parked boundary returns recovery
+control to the daemon while retaining the warm session for later resolution.
+
+A suspension parks inside the affected tool invocation. Sibling calls can keep running, while the model runtime's
+batch barrier prevents the next inference step until every call has a result. Calls and waits are tracked separately
+by stable tool-call identity, and each wait has an opaque identity for the exact suspended step. Completed results are
+assembled in assistant source order rather than completion order. Recovery applies the same ordering, resumes all
+unfinished siblings, and issues one model continuation in each successful recovery attempt after the batch completes.
+
+Runtime ownership begins when a registered Genii tool wrapper starts, but recoverable batch durability begins only
+when the first wait checkpoint commits. Provider or model-runtime validation before wrapper entry remains outside the
+replay model; once a sibling commits that first wait, already-finalized preflight result artifacts are retained so the
+recoverable batch stays complete and source ordered. Sibling work completed before that wait is otherwise outside the
+durable model. Within a durable batch, arbitrary code between later barriers can still replay after an abrupt process
+failure; side effects that must not repeat belong in stable, memoized tool steps. Delivery, provider inference, and
+arbitrary post-resume side effects remain at-least-once rather than exactly-once. These stores favor inspectable,
+local state over distributed coordination or high availability.
+
+Durable waits are resolved explicitly through the control plane. Multiple sibling invocations may suspend in one
+batch, and one invocation may encounter sequential waits. Targeted cancellation affects only its exact suspension;
+aborting the session stops the whole batch. See [Durable suspensions](docs/durable-suspensions.md) for the tool and RPC
+contracts.
 
 Configuration is also local and owner-managed. Logical model names separate session policy from provider-specific
 identifiers, and secret references keep credentials out of ordinary configuration. Native credential storage is
@@ -157,7 +189,11 @@ protected as user data. Credentials receive separate handling, but the broader d
 vault.
 
 Startup restores routing state before accepting control or channel traffic while leaving suspended models dormant.
-Shutdown stops new work first, then scheduling and channel ingress, flushes and detaches waiting sessions immediately,
-and drains other active sessions within a limit. Failures are surfaced through structured logs and lightweight
-health/status data. Message delivery remains best-effort: there is no durable outbound queue or end-to-end exactly-once
-guarantee.
+Shutdown stops new work first, then scheduling and channel ingress, and drains accepted conversation routes as an
+ordering barrier even during hard shutdown. During the graceful window, an active batch remains active until its
+unfinished calls complete or all park. Genii then fences further lifecycle mutations, flushes and detaches fully
+parked sessions, terminates remaining active sessions, and waits within the configured bound for serialized
+checkpoint work accepted before or as part of that shutdown fence. Explicit whole-session termination commits
+cleared continuation state instead of preserving a recovery marker. Failures are surfaced through structured logs and
+lightweight health/status data. Message delivery remains best-effort: there is no durable outbound queue or
+end-to-end exactly-once guarantee.

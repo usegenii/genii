@@ -33,12 +33,20 @@ export class AgentHandleImpl implements AgentHandle {
 	private waitResolve: ((result: AgentResult) => void) | null = null;
 	private eventHistory: AgentEvent[] = [];
 	private running = false;
+	private terminated = false;
+	private activeIterator: AsyncIterator<AgentEvent> | null = null;
 
 	constructor(instance: AgentInstance, config: AgentSpawnConfig) {
 		this.id = instance.id as AgentSessionId;
 		this.instance = instance;
 		this.config = config;
 		this.createdAt = new Date();
+		// A restored durable suspension is already fully parked before its
+		// event iterator starts. Preserve that state so shutdown can detach it
+		// without treating it like an unstarted ordinary session.
+		if (instance.status() === 'waiting') {
+			this._status = 'waiting';
+		}
 	}
 
 	get status(): AgentStatus {
@@ -49,27 +57,39 @@ export class AgentHandleImpl implements AgentHandle {
 	 * Start the agent execution loop.
 	 */
 	async start(): Promise<void> {
-		if (this.running) return;
+		if (this.running || this.terminated) return;
 		this.running = true;
+		let iterator: AsyncIterator<AgentEvent> | null = null;
 
 		try {
-			for await (const event of this.instance.run()) {
-				this.handleEvent(event);
+			iterator = this.instance.run()[Symbol.asyncIterator]();
+			this.activeIterator = iterator;
+			while (!this.terminated) {
+				const next = await iterator.next();
+				if (next.done || this.terminated) break;
+				this.handleEvent(next.value);
 			}
 		} catch (error) {
-			this.handleEvent({
-				type: 'error',
-				error: error instanceof Error ? error.message : String(error),
-				fatal: true,
-				stack: error instanceof Error ? error.stack : undefined,
-				timestamp: Date.now(),
-			});
+			if (!this.terminated) {
+				this.handleEvent({
+					type: 'error',
+					error: error instanceof Error ? error.message : String(error),
+					fatal: true,
+					stack: error instanceof Error ? error.stack : undefined,
+					timestamp: Date.now(),
+				});
+			}
 		} finally {
+			if (this.activeIterator === iterator) {
+				this.activeIterator = null;
+			}
 			this.running = false;
 		}
 	}
 
 	private handleEvent(event: AgentEvent): void {
+		if (this.terminated) return;
+
 		// Track event
 		this.eventHistory.push(event);
 
@@ -153,16 +173,19 @@ export class AgentHandleImpl implements AgentHandle {
 
 	async pause(): Promise<void> {
 		await this.instance.pause();
-		this._status = 'paused';
+		if (!this.terminated) this._status = 'paused';
 	}
 
 	async resume(): Promise<void> {
 		await this.instance.resume();
-		this._status = 'running';
+		if (!this.terminated) this._status = 'running';
 	}
 
 	async terminate(reason?: string): Promise<void> {
+		if (this.terminated) return;
+		this.terminated = true;
 		this.instance.abort();
+		this.closeActiveIterator();
 		this._status = 'terminated';
 
 		const terminateResult: AgentResult = {
@@ -185,6 +208,18 @@ export class AgentHandleImpl implements AgentHandle {
 			result: terminateResult,
 			timestamp: Date.now(),
 		});
+	}
+
+	private closeActiveIterator(): void {
+		const iterator = this.activeIterator;
+		this.activeIterator = null;
+		if (!iterator?.return) return;
+
+		try {
+			void Promise.resolve(iterator.return()).catch(() => undefined);
+		} catch {
+			// The instance has already been aborted; iterator cleanup is best effort.
+		}
 	}
 
 	wait(): Promise<AgentResult> {

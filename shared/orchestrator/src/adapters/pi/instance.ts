@@ -2,7 +2,13 @@
  * Pi agent instance implementation.
  */
 
-import type { AgentMessage, AgentToolResult, AgentTool as PiAgentTool, StreamFn } from '@mariozechner/pi-agent-core';
+import type {
+	AgentMessage,
+	AgentToolResult,
+	AgentEvent as PiAgentEvent,
+	AgentTool as PiAgentTool,
+	StreamFn,
+} from '@mariozechner/pi-agent-core';
 import { Agent } from '@mariozechner/pi-agent-core';
 import type { Api, Message, Model } from '@mariozechner/pi-ai';
 import { getModels, streamSimple } from '@mariozechner/pi-ai';
@@ -20,6 +26,7 @@ import type {
 	SuspensionId,
 	SuspensionRequest,
 	SuspensionResolution,
+	ToolExecutionResult,
 	ToolExecutionState,
 } from '../../tools/types';
 import type { AgentInput, AgentSessionId } from '../../types/core';
@@ -33,6 +40,7 @@ import {
 	createToolExecutionTracker,
 	type ToolCompletionContext,
 	type ToolExecutionTracker,
+	type ToolStartContext,
 	type ToolSuspensionContext,
 } from './guidance';
 import { agentToolResultToPiMessage, checkpointToPiMessages, piMessagesToCheckpoint } from './messages';
@@ -126,9 +134,12 @@ export class PiAgentInstance implements AgentInstance {
 	private pausePromise: Promise<void> | null = null;
 	private pauseResolve: (() => void) | null = null;
 	private suspensionResolvers = new Map<SuspensionId, SuspensionResolver>();
-	private resolutionBarriers = new Map<SuspensionId, Promise<void>>();
+	private lifecycleTail: Promise<void> = Promise.resolve();
 	private activeEventQueue: AsyncEventQueue<AgentEvent> | null = null;
 	private fatalLifecycleError: unknown = null;
+	private lifecycleRecoveryMessageCount: number | null = null;
+	private lifecycleGeneration = 0;
+	private aborted = false;
 	private turnCount = 0;
 	private startTime = Date.now();
 	private inputQueue: AgentInput[] = [];
@@ -161,14 +172,9 @@ export class PiAgentInstance implements AgentInstance {
 			this.turnCount = options.restoreOptions.turnCount;
 			for (const execution of options.restoreOptions.toolExecutions) {
 				this.toolExecutionStates.set(execution.toolCallId, execution);
-				if (execution.suspendedStep) {
-					this.pendingRequests.push(this.executionToPendingRequest(execution));
-				}
 			}
-			if (this.pendingRequests.length > 1) {
-				throw new Error('Checkpoint contains concurrent suspensions, which are not supported');
-			}
-			if (this.pendingRequests.length > 0) {
+			this.refreshPendingRequests();
+			if (this.areAllIncompleteExecutionsParked()) {
 				this._status = 'waiting';
 			}
 		}
@@ -185,25 +191,10 @@ export class PiAgentInstance implements AgentInstance {
 			this.thinkingLevel = options.thinkingLevel;
 		}
 
-		// Build Pi tools from our tools (use empty registry if not provided)
-		const toolRegistry = config.tools ?? createToolRegistry();
-		const piTools = buildPiTools(
-			toolRegistry.all(),
-			this.id,
-			config.guidance,
-			this.abortController.signal,
-			this.tracker,
-			// Progress callback
-			(_toolCallId, _toolName, _progress) => {
-				// Progress is emitted through events
-			},
-			// Suspension callback
-			(suspension) => this.handleSuspension(suspension),
-			// Get resume data
-			(toolCallId) => this.toolExecutionStates.get(toolCallId),
-			// Persist the real tool result before Pi begins its next model turn.
-			(completion, result) => this.handleToolCompletion(completion, result),
-		);
+		// Build Pi tools from our tools (use empty registry if not provided).
+		// Each wrapper generation is fenced so callbacks from an aborted replay
+		// cannot mutate the next retry's durable state.
+		const piTools = this.createPiTools(this.lifecycleGeneration);
 
 		// Get initial messages - either from restore or empty
 		const initialMessages = options.restoreOptions?.messages ?? [];
@@ -230,8 +221,8 @@ export class PiAgentInstance implements AgentInstance {
 			streamFn: this.streamFn,
 			steeringMode: 'one-at-a-time',
 			followUpMode: 'one-at-a-time',
-			// Tool execution state is shared across calls, so preserve pi 0.49's serial behavior.
-			toolExecution: 'sequential',
+			// Pi starts wrappers concurrently but publishes their messages in source order.
+			toolExecution: 'parallel',
 		});
 
 		// Queue initial input
@@ -241,7 +232,8 @@ export class PiAgentInstance implements AgentInstance {
 	}
 
 	async *run(): AsyncIterable<AgentEvent> {
-		if (this.fatalLifecycleError && this.getSuspendedExecution()) {
+		if (this.aborted) return;
+		if (this.fatalLifecycleError && this.toolExecutionStates.size > 0) {
 			this.rebuildAgentAfterLifecycleFailure();
 			this.fatalLifecycleError = null;
 		}
@@ -256,36 +248,38 @@ export class PiAgentInstance implements AgentInstance {
 
 		try {
 			const initialInput = this.inputQueue.shift();
-			const restoredExecution = this.getSuspendedExecution();
-			if (initialInput?.message || restoredExecution) {
+			const hasRestoredBatch = this.toolExecutionStates.size > 0;
+			if (initialInput?.message || hasRestoredBatch) {
 				if (initialInput?.message) {
 					this.logger.debug({ messageLength: initialInput.message.length }, 'Processing initial input');
 				}
 
 				const eventQueue = new AsyncEventQueue<AgentEvent>();
 				this.activeEventQueue = eventQueue;
-				const unsubscribe = this.agent.subscribe((piEvent) => {
+				const lifecycleGeneration = this.lifecycleGeneration;
+				const unsubscribe = this.agent.subscribe(async (piEvent) => {
 					this.logger.debug({ piEventType: piEvent.type }, 'Pi event received');
+					if (piEvent.type === 'turn_end') this.turnCount++;
+					await this.handlePiLifecycleEvent(piEvent, lifecycleGeneration);
 					const mapped = mapPiEvent(piEvent, this.toolCallTimes);
 					if (Array.isArray(mapped)) {
 						for (const event of mapped) eventQueue.push(event);
 					} else if (mapped) {
 						eventQueue.push(mapped);
 					}
-					if (piEvent.type === 'turn_end') this.turnCount++;
 				});
 
 				let operationError: unknown = null;
 				const operation = initialInput?.message
 					? this.agent.prompt(initialInput.message)
-					: this.replayRestoredExecution(restoredExecution as ToolExecutionState);
+					: this.replayRestoredBatch(lifecycleGeneration);
 				const operationPromise = operation
 					.catch((error) => {
 						operationError = error;
 					})
 					.finally(() => {
 						unsubscribe();
-						this.activeEventQueue = null;
+						if (this.activeEventQueue === eventQueue) this.activeEventQueue = null;
 						eventQueue.close();
 					});
 
@@ -300,6 +294,11 @@ export class PiAgentInstance implements AgentInstance {
 					yield event;
 				}
 
+				if (this.aborted) {
+					unsubscribe();
+					this.activeEventQueue = null;
+					return;
+				}
 				if (this.fatalLifecycleError) {
 					unsubscribe();
 					this.activeEventQueue = null;
@@ -308,7 +307,6 @@ export class PiAgentInstance implements AgentInstance {
 				await operationPromise;
 				if (operationError) throw operationError;
 
-				await this.clearCompletedToolExecutions();
 				const lastMsg = this.agent.state.messages[this.agent.state.messages.length - 1];
 				if (lastMsg && 'stopReason' in lastMsg && lastMsg.stopReason === 'error') {
 					throw new Error(`LLM returned error response: ${this.extractErrorFromMessage(lastMsg)}`);
@@ -316,6 +314,8 @@ export class PiAgentInstance implements AgentInstance {
 			} else {
 				this.logger.warn('No initial input or suspended tool invocation — skipping LLM call');
 			}
+
+			if (this.aborted) return;
 
 			// Handle completion
 			if (this.pendingRequests.length === 0) {
@@ -358,6 +358,10 @@ export class PiAgentInstance implements AgentInstance {
 				};
 			}
 		} catch (error) {
+			if (this.aborted) {
+				this._status = 'aborted';
+				return;
+			}
 			this._status = 'failed';
 			yield {
 				type: 'error',
@@ -412,16 +416,33 @@ export class PiAgentInstance implements AgentInstance {
 	}
 
 	abort(): void {
+		if (this.aborted) return;
+		this.aborted = true;
+		this.lifecycleGeneration++;
+		this.tracker = createToolExecutionTracker();
+		this._status = 'aborted';
+		this.pendingRequests = [];
 		this.abortController.abort();
 		this.agent.abort();
 		for (const resolver of this.suspensionResolvers.values()) {
 			resolver.reject(new Error('Agent aborted while waiting for a suspension resolution'));
 		}
 		this.suspensionResolvers.clear();
-		this._status = 'aborted';
+		this.activeEventQueue?.close();
+		void this.serializeLifecycle(() => {
+			this.toolExecutionStates.clear();
+			this.tracker.executions.clear();
+		}).catch((error) => {
+			this.logger.error({ error }, 'Failed to clear aborted tool batch state');
+		});
 	}
 
 	async checkpoint(): Promise<InstanceCheckpoint> {
+		return this.serializeLifecycle(() => this.buildCheckpoint());
+	}
+
+	private buildCheckpoint(): InstanceCheckpoint {
+		this.synchronizeTrackedSteps();
 		const messages = this.agent.state.messages as Message[];
 
 		return {
@@ -450,7 +471,9 @@ export class PiAgentInstance implements AgentInstance {
 			adapterConfig: {
 				thinkingLevel: this.thinkingLevel,
 			},
-			toolExecutions: [...this.toolExecutionStates.values()],
+			// A batch enters the durable model once any registered call suspends.
+			// Before that boundary, runtime-only call records are intentionally omitted.
+			toolExecutions: this.isDurableBatch() ? structuredClone(this.getOrderedToolExecutions()) : [],
 		};
 	}
 
@@ -464,93 +487,203 @@ export class PiAgentInstance implements AgentInstance {
 
 	async resolve(resolutions: PendingResolution[]): Promise<void> {
 		if (resolutions.length === 0) return;
-		if (resolutions.length > 1) {
-			throw new Error('Only one active suspended invocation is supported per session');
-		}
+		const lifecycleGeneration = this.lifecycleGeneration;
 
-		const resolution = resolutions[0] as SuspensionResolution;
-		const execution = this.findExecutionBySuspensionId(resolution.suspensionId);
-		if (!execution?.suspendedStep) {
-			throw new Error(`Suspension "${resolution.suspensionId}" is stale or does not exist`);
-		}
+		await this.serializeLifecycle(async () => {
+			this.assertLifecycleActive(lifecycleGeneration);
+			const uniqueResolutions = new Map<SuspensionId, SuspensionResolution>();
+			const accepted: Array<{
+				execution: ToolExecutionState;
+				resolution: SuspensionResolution;
+				resumeData: StepResumeData;
+			}> = [];
 
-		const suspendedStep = execution.suspendedStep;
-		if (suspendedStep.status === 'resolved') {
-			if (suspendedStep.resolution && isIdenticalResolution(suspendedStep.resolution, resolution)) {
-				await this.resolutionBarriers.get(resolution.suspensionId);
-				return;
+			for (const pendingResolution of resolutions) {
+				const resolution = pendingResolution as SuspensionResolution;
+				const duplicate = uniqueResolutions.get(resolution.suspensionId);
+				if (duplicate) {
+					if (isIdenticalResolution(duplicate, resolution)) continue;
+					throw new Error(`Suspension "${resolution.suspensionId}" has conflicting requested resolutions`);
+				}
+				uniqueResolutions.set(resolution.suspensionId, resolution);
 			}
-			throw new Error(`Suspension "${resolution.suspensionId}" already has a conflicting resolution`);
-		}
 
-		const resumeData = normalizeSuspensionResolution(suspendedStep.stepId, suspendedStep.request, resolution);
-		suspendedStep.status = 'resolved';
-		suspendedStep.resolution = resolution;
-		suspendedStep.resumeData = resumeData;
-		this.pendingRequests = [this.executionToPendingRequest(execution)];
+			for (const resolution of uniqueResolutions.values()) {
+				const execution = this.findExecutionBySuspensionId(resolution.suspensionId);
+				if (!execution?.suspendedStep) {
+					throw new Error(`Suspension "${resolution.suspensionId}" is stale or does not exist`);
+				}
 
-		const resolutionBarrier = this.persistLifecycle('resolution_accepted');
-		this.resolutionBarriers.set(resolution.suspensionId, resolutionBarrier);
+				const suspendedStep = execution.suspendedStep;
+				if (suspendedStep.status === 'resolved') {
+					if (suspendedStep.resolution && isIdenticalResolution(suspendedStep.resolution, resolution)) {
+						continue;
+					}
+					throw new Error(`Suspension "${resolution.suspensionId}" already has a conflicting resolution`);
+				}
+				if (execution.result) {
+					throw new Error(`Suspension "${resolution.suspensionId}" is stale or does not exist`);
+				}
+
+				accepted.push({
+					execution,
+					resolution,
+					resumeData: normalizeSuspensionResolution(suspendedStep.stepId, suspendedStep.request, resolution),
+				});
+			}
+
+			if (accepted.length === 0) return;
+			for (const { execution, resolution, resumeData } of accepted) {
+				const suspendedStep = execution.suspendedStep as NonNullable<ToolExecutionState['suspendedStep']>;
+				suspendedStep.status = 'resolved';
+				suspendedStep.resolution = resolution;
+				suspendedStep.resumeData = resumeData;
+			}
+
+			try {
+				await this.persistLifecycleNow('resolution_accepted');
+				this.assertLifecycleActive(lifecycleGeneration);
+				// Keep the public pending view at the last durable state until the
+				// accepted resolution checkpoint has committed.
+				this.refreshPendingRequests();
+			} catch (error) {
+				for (const { execution } of accepted) {
+					const suspendedStep = execution.suspendedStep as NonNullable<ToolExecutionState['suspendedStep']>;
+					suspendedStep.status = 'waiting';
+					suspendedStep.resolution = undefined;
+					suspendedStep.resumeData = undefined;
+				}
+				if (!this.aborted) this.refreshPendingRequests();
+				throw error;
+			}
+
+			for (const { resolution, resumeData } of accepted) {
+				const resolver = this.suspensionResolvers.get(resolution.suspensionId);
+				if (resolver) {
+					resolver.resolve(resumeData);
+					this.suspensionResolvers.delete(resolution.suspensionId);
+				}
+			}
+
+			if (this.hasWaitingSuspensions()) {
+				this.publishSuspensionState();
+			} else {
+				this._status = 'running';
+				this.activeEventQueue?.push({ type: 'status', status: 'running', timestamp: Date.now() });
+			}
+		});
+	}
+
+	private async handleToolStart(start: ToolStartContext, lifecycleGeneration: number): Promise<void> {
+		this.assertNotAborted();
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
 		try {
-			await resolutionBarrier;
+			await this.serializeLifecycle(() => {
+				this.assertLifecycleActive(lifecycleGeneration);
+				const execution = this.toolExecutionStates.get(start.toolCallId);
+				if (execution) {
+					// Pi announces every source call before preflight. The registered
+					// wrapper then replaces raw arguments with its validated input.
+					execution.toolName = start.toolName;
+					execution.input = start.input;
+					return;
+				}
+				this.toolExecutionStates.set(start.toolCallId, {
+					toolName: start.toolName,
+					toolCallId: start.toolCallId,
+					input: start.input,
+					sourceOrder: this.getToolSourceOrder(start.toolCallId),
+					completedSteps: [],
+				});
+			});
 		} catch (error) {
-			suspendedStep.status = 'waiting';
-			suspendedStep.resolution = undefined;
-			suspendedStep.resumeData = undefined;
-			this.pendingRequests = [this.executionToPendingRequest(execution)];
+			if (this.aborted) throw error;
+			if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
 			throw error;
-		} finally {
-			this.resolutionBarriers.delete(resolution.suspensionId);
-		}
-
-		this._status = 'running';
-		this.activeEventQueue?.push({ type: 'status', status: 'running', timestamp: Date.now() });
-		const resolver = this.suspensionResolvers.get(resolution.suspensionId);
-		if (resolver) {
-			resolver.resolve(resumeData);
-			this.suspensionResolvers.delete(resolution.suspensionId);
 		}
 	}
 
-	private async handleSuspension(suspension: ToolSuspensionContext): Promise<StepResumeData> {
-		const current = this.getSuspendedExecution();
-		if (current?.suspendedStep && current.toolCallId !== suspension.toolCallId) {
-			throw new Error('Concurrent tool suspensions are not supported');
-		}
-
-		const suspendedAt = Date.now();
-		const suspensionId = createSuspensionId(suspension.toolCallId, suspension.stepId);
-		const execution: ToolExecutionState = {
-			toolName: suspension.toolName,
-			toolCallId: suspension.toolCallId,
-			input: suspension.input,
-			completedSteps: suspension.completedSteps,
-			suspendedStep: {
-				suspensionId,
-				stepId: suspension.stepId,
-				request: suspension.request,
-				suspendedAt,
-				deadline: getSuspensionDeadline(suspension.request, suspendedAt),
-				status: 'waiting',
-			},
-		};
-		this.toolExecutionStates.set(suspension.toolCallId, execution);
-		this.pendingRequests = [this.executionToPendingRequest(execution)];
-
+	private async handlePiToolCompletion(
+		completion: Extract<PiAgentEvent, { type: 'tool_execution_end' }>,
+		lifecycleGeneration: number,
+	): Promise<void> {
+		if (this.aborted) return;
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
 		try {
-			await this.persistLifecycle('suspended');
-		} catch (error) {
-			this.failLifecycle(error);
-			return new Promise<StepResumeData>(() => {});
-		}
+			await this.serializeLifecycle(async () => {
+				this.assertLifecycleActive(lifecycleGeneration);
+				const execution = this.toolExecutionStates.get(completion.toolCallId) ?? {
+					toolName: completion.toolName,
+					toolCallId: completion.toolCallId,
+					input: undefined,
+					sourceOrder: this.getToolSourceOrder(completion.toolCallId),
+					completedSteps: [],
+				};
 
-		this._status = 'waiting';
-		this.activeEventQueue?.push({ type: 'status', status: 'waiting', timestamp: Date.now() });
-		this.activeEventQueue?.push({
-			type: 'suspended',
-			pendingRequests: [...this.pendingRequests],
-			timestamp: Date.now(),
-		});
+				// Registered wrappers persist their result in onComplete before Pi
+				// emits this event. Immediate preflight failures never enter a wrapper,
+				// so retain their finalized artifact here for durable batch recovery.
+				if (execution.result) return;
+				execution.result = this.storeToolResult(completion.result, completion.isError);
+				this.toolExecutionStates.set(completion.toolCallId, execution);
+				this.refreshPendingRequests();
+
+				if (this.isDurableBatch() && this.hasOtherIncompleteExecution(completion.toolCallId)) {
+					await this.persistLifecycleNow('tool_completed');
+					this.assertLifecycleActive(lifecycleGeneration);
+				}
+				if (this.hasWaitingSuspensions() && this.areAllIncompleteExecutionsParked()) {
+					this.publishSuspensionState();
+				}
+			});
+		} catch (error) {
+			if (this.aborted) return;
+			if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+			this.failLifecycle(error, lifecycleGeneration);
+			return this.parkFailedGeneration();
+		}
+	}
+
+	private async handleSuspension(
+		suspension: ToolSuspensionContext,
+		lifecycleGeneration: number,
+	): Promise<StepResumeData> {
+		this.assertNotAborted();
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+		const suspensionId = createSuspensionId(suspension.toolCallId, suspension.stepId);
+		try {
+			await this.serializeLifecycle(async () => {
+				this.assertLifecycleActive(lifecycleGeneration);
+				const suspendedAt = Date.now();
+				const execution = this.toolExecutionStates.get(suspension.toolCallId) ?? {
+					toolName: suspension.toolName,
+					toolCallId: suspension.toolCallId,
+					input: suspension.input,
+					sourceOrder: this.getToolSourceOrder(suspension.toolCallId),
+					completedSteps: [],
+				};
+				execution.completedSteps = suspension.completedSteps;
+				execution.suspendedStep = {
+					suspensionId,
+					stepId: suspension.stepId,
+					request: suspension.request,
+					suspendedAt,
+					deadline: getSuspensionDeadline(suspension.request, suspendedAt),
+					status: 'waiting',
+				};
+				execution.result = undefined;
+				this.toolExecutionStates.set(suspension.toolCallId, execution);
+				await this.persistLifecycleNow('suspended');
+				this.assertLifecycleActive(lifecycleGeneration);
+				this.refreshPendingRequests();
+				this.publishSuspensionState();
+			});
+		} catch (error) {
+			if (this.aborted) throw error;
+			if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+			this.failLifecycle(error, lifecycleGeneration);
+			return this.parkFailedGeneration();
+		}
 
 		return this.waitForResolution(suspensionId);
 	}
@@ -558,56 +691,157 @@ export class PiAgentInstance implements AgentInstance {
 	private async handleToolCompletion(
 		completion: ToolCompletionContext,
 		result: AgentToolResult<unknown>,
+		lifecycleGeneration: number,
 	): Promise<void> {
-		const execution = this.toolExecutionStates.get(completion.toolCallId);
-		if (execution?.suspendedStep?.status !== 'resolved') return;
-
-		execution.completedSteps = completion.completedSteps;
-		const pendingBeforeCompletion = [...this.pendingRequests];
-		this.toolExecutionStates.delete(completion.toolCallId);
-		this.pendingRequests = this.pendingRequests.filter((request) => request.toolCallId !== completion.toolCallId);
-
+		this.assertNotAborted();
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
 		try {
-			if (this.config.onCheckpoint) {
-				const checkpoint = await this.checkpoint();
-				const resultMessage = agentToolResultToPiMessage(completion.toolCallId, completion.toolName, result);
-				checkpoint.messages.push(...piMessagesToCheckpoint([resultMessage]));
-				await this.config.onCheckpoint(checkpoint, 'tool_completed');
-			}
+			await this.serializeLifecycle(async () => {
+				this.assertLifecycleActive(lifecycleGeneration);
+				const execution = this.toolExecutionStates.get(completion.toolCallId) ?? {
+					toolName: completion.toolName,
+					toolCallId: completion.toolCallId,
+					input: completion.input,
+					sourceOrder: this.getToolSourceOrder(completion.toolCallId),
+					completedSteps: [],
+				};
+				execution.completedSteps = completion.completedSteps;
+				execution.result = this.storeToolResult(result);
+				this.toolExecutionStates.set(completion.toolCallId, execution);
+				this.refreshPendingRequests();
+
+				// Persist partial batch progress while another wrapper is still
+				// outstanding. The final call is committed at Pi's turn barrier.
+				if (this.isDurableBatch() && this.hasOtherIncompleteExecution(completion.toolCallId)) {
+					await this.persistLifecycleNow('tool_completed');
+					this.assertLifecycleActive(lifecycleGeneration);
+				}
+				if (this.hasWaitingSuspensions() && this.areAllIncompleteExecutionsParked()) {
+					this.publishSuspensionState();
+				}
+			});
 		} catch (error) {
-			this.toolExecutionStates.set(completion.toolCallId, execution);
-			this.pendingRequests = pendingBeforeCompletion;
-			this.failLifecycle(error);
-			return new Promise<void>(() => {});
+			if (this.aborted) throw error;
+			if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+			this.failLifecycle(error, lifecycleGeneration);
+			return this.parkFailedGeneration();
 		}
 	}
 
-	private failLifecycle(error: unknown): void {
-		this.fatalLifecycleError = error;
+	private async handlePiLifecycleEvent(event: PiAgentEvent, lifecycleGeneration: number): Promise<void> {
+		if (this.aborted) return;
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+		try {
+			if (event.type === 'tool_execution_start') {
+				await this.handleToolStart(
+					{
+						toolCallId: event.toolCallId,
+						toolName: event.toolName,
+						input: event.args,
+					},
+					lifecycleGeneration,
+				);
+				return;
+			}
+			if (event.type === 'tool_execution_end') {
+				await this.handlePiToolCompletion(event, lifecycleGeneration);
+				return;
+			}
+			if (event.type !== 'turn_end' || event.toolResults.length === 0) return;
+			await this.handleToolBatchBarrier(event.toolResults, lifecycleGeneration);
+		} catch (error) {
+			if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) return this.parkFailedGeneration();
+			this.failLifecycle(error, lifecycleGeneration);
+			throw error;
+		}
+	}
+
+	private async handleToolBatchBarrier(
+		toolResults: Extract<PiAgentEvent, { type: 'turn_end' }>['toolResults'],
+		lifecycleGeneration: number,
+	): Promise<void> {
+		await this.serializeLifecycle(async () => {
+			this.assertLifecycleActive(lifecycleGeneration);
+			const toolCallIds = new Set(toolResults.map((result) => result.toolCallId));
+			const batchExecutions = this.getOrderedToolExecutions().filter((execution) =>
+				toolCallIds.has(execution.toolCallId),
+			);
+			if (batchExecutions.length === 0) return;
+
+			const durable = batchExecutions.some((execution) => execution.suspendedStep !== undefined);
+			for (const resultMessage of toolResults) {
+				const execution = this.toolExecutionStates.get(resultMessage.toolCallId);
+				if (execution && !execution.result) {
+					execution.result = this.storeToolResult(
+						{ content: resultMessage.content, details: resultMessage.details },
+						resultMessage.isError,
+					);
+				}
+			}
+
+			if (!durable) {
+				for (const execution of batchExecutions) {
+					this.toolExecutionStates.delete(execution.toolCallId);
+				}
+				this.refreshPendingRequests();
+				return;
+			}
+			// Pi has already appended every result message in assistant source
+			// order. Keep the completed per-call records in this checkpoint as
+			// the durable marker that one model continuation is still pending.
+			await this.persistLifecycleNow('tool_completed');
+			for (const execution of batchExecutions) {
+				this.toolExecutionStates.delete(execution.toolCallId);
+			}
+			this.refreshPendingRequests();
+		});
+	}
+
+	private failLifecycle(error: unknown, lifecycleGeneration: number): void {
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration) || this.aborted) return;
+		if (this.lifecycleRecoveryMessageCount === null) {
+			this.lifecycleRecoveryMessageCount = this.agent.state.messages.length;
+		}
+		this.fatalLifecycleError ??= error;
+		this.lifecycleGeneration++;
+		this.tracker = createToolExecutionTracker();
+		this.abortController.abort();
 		this.agent.abort();
+		for (const resolver of this.suspensionResolvers.values()) {
+			resolver.reject(new Error('Tool lifecycle generation failed before suspension resolution'));
+		}
+		this.suspensionResolvers.clear();
 		this.activeEventQueue?.close();
 	}
 
 	private rebuildAgentAfterLifecycleFailure(): void {
 		const state = this.agent.state;
+		const messages =
+			this.lifecycleRecoveryMessageCount === null
+				? state.messages
+				: state.messages.slice(0, this.lifecycleRecoveryMessageCount);
+		this.abortController = new AbortController();
+		this.tracker = createToolExecutionTracker();
 		this.agent = new Agent({
 			initialState: {
 				systemPrompt: state.systemPrompt,
 				model: state.model,
 				thinkingLevel: state.thinkingLevel,
-				tools: state.tools,
-				messages: state.messages,
-				isStreaming: false,
-				streamMessage: null,
-				pendingToolCalls: new Set(),
+				tools: this.createPiTools(this.lifecycleGeneration),
+				messages,
 			},
 			streamFn: this.streamFn,
 			steeringMode: 'one-at-a-time',
 			followUpMode: 'one-at-a-time',
+			toolExecution: 'parallel',
 		});
+		this.lifecycleRecoveryMessageCount = null;
 	}
 
 	private waitForResolution(suspensionId: SuspensionId): Promise<StepResumeData> {
+		if (this.aborted) {
+			return Promise.reject(new Error('Agent aborted while waiting for a suspension resolution'));
+		}
 		const execution = this.findExecutionBySuspensionId(suspensionId);
 		const accepted = execution?.suspendedStep?.resumeData;
 		if (accepted) return Promise.resolve(accepted);
@@ -615,10 +849,6 @@ export class PiAgentInstance implements AgentInstance {
 		return new Promise((resolve, reject) => {
 			this.suspensionResolvers.set(suspensionId, { resolve, reject });
 		});
-	}
-
-	private getSuspendedExecution(): ToolExecutionState | undefined {
-		return [...this.toolExecutionStates.values()].find((execution) => execution.suspendedStep !== undefined);
 	}
 
 	private findExecutionBySuspensionId(suspensionId: SuspensionId): ToolExecutionState | undefined {
@@ -644,59 +874,148 @@ export class PiAgentInstance implements AgentInstance {
 		};
 	}
 
-	private async persistLifecycle(reason: 'suspended' | 'resolution_accepted' | 'tool_completed'): Promise<void> {
+	private async persistLifecycleNow(reason: 'suspended' | 'resolution_accepted' | 'tool_completed'): Promise<void> {
 		if (!this.config.onCheckpoint) return;
-		await this.config.onCheckpoint(await this.checkpoint(), reason);
+		await this.config.onCheckpoint(this.buildCheckpoint(), reason);
 	}
 
-	private async replayRestoredExecution(execution: ToolExecutionState): Promise<void> {
-		const suspended = execution.suspendedStep;
-		if (!suspended) throw new Error(`Tool execution "${execution.toolCallId}" is not suspended`);
-
-		if (suspended.status === 'waiting') {
-			try {
-				await this.persistLifecycle('suspended');
-			} catch (error) {
-				this.failLifecycle(error);
-				return new Promise<void>(() => {});
+	private async replayRestoredBatch(lifecycleGeneration: number): Promise<void> {
+		try {
+			this.assertLifecycleActive(lifecycleGeneration);
+			if (this.hasWaitingSuspensions()) {
+				await this.serializeLifecycle(async () => {
+					this.assertLifecycleActive(lifecycleGeneration);
+					await this.persistLifecycleNow('suspended');
+					this.assertLifecycleActive(lifecycleGeneration);
+					this.refreshPendingRequests();
+					this.publishSuspensionState();
+				});
 			}
-			this._status = 'waiting';
-			this.activeEventQueue?.push({ type: 'status', status: 'waiting', timestamp: Date.now() });
-			this.activeEventQueue?.push({
-				type: 'suspended',
-				pendingRequests: [...this.pendingRequests],
-				timestamp: Date.now(),
-			});
+
+			const executions = this.getOrderedToolExecutions();
+			await Promise.all(executions.map((execution) => this.replayToolExecution(execution)));
+			this.assertLifecycleActive(lifecycleGeneration);
+			await this.commitRestoredBatch(lifecycleGeneration);
+			this.assertLifecycleActive(lifecycleGeneration);
+			await this.agent.continue();
+		} catch (error) {
+			if (!this.aborted && this.isCurrentLifecycleGeneration(lifecycleGeneration)) {
+				this.failLifecycle(error, lifecycleGeneration);
+			}
+			throw error;
+		}
+	}
+
+	private async replayToolExecution(execution: ToolExecutionState): Promise<void> {
+		let current = this.toolExecutionStates.get(execution.toolCallId);
+		if (!current || current.result) return;
+
+		const suspended = current.suspendedStep;
+		if (suspended?.status === 'waiting') {
 			await this.waitForResolution(suspended.suspensionId);
 		}
-
-		const current = this.toolExecutionStates.get(execution.toolCallId);
-		if (!current?.suspendedStep?.resumeData) {
-			throw new Error(`Suspension "${suspended.suspensionId}" has no accepted resolution`);
+		current = this.toolExecutionStates.get(execution.toolCallId);
+		if (!current || current.result) return;
+		if (current.suspendedStep && !current.suspendedStep.resumeData) {
+			throw new Error(`Suspension "${current.suspendedStep.suspensionId}" has no accepted resolution`);
 		}
 
-		if (!this.hasToolResult(execution.toolCallId)) {
-			const tool = this.agent.state.tools.find((candidate) => candidate.name === execution.toolName);
-			if (!tool) throw new Error(`Cannot replay missing tool "${execution.toolName}"`);
-			const result = await this.executeRestoredTool(tool, execution);
-			this.agent.appendMessage(agentToolResultToPiMessage(execution.toolCallId, execution.toolName, result));
-		}
+		const tool = this.agent.state.tools.find((candidate) => candidate.name === current?.toolName);
+		if (!tool) throw new Error(`Cannot replay missing tool "${current.toolName}"`);
+		await this.executeRestoredTool(tool, current);
+	}
 
-		const latest = this.toolExecutionStates.get(execution.toolCallId);
-		if (latest?.suspendedStep?.status === 'waiting') return;
-		if (latest) {
-			const pendingBeforeCompletion = [...this.pendingRequests];
-			this.toolExecutionStates.delete(execution.toolCallId);
-			this.pendingRequests = [];
-			try {
-				await this.persistLifecycle('tool_completed');
-			} catch (error) {
-				this.toolExecutionStates.set(execution.toolCallId, latest);
-				this.pendingRequests = pendingBeforeCompletion;
-				throw error;
+	private async commitRestoredBatch(lifecycleGeneration: number): Promise<void> {
+		await this.serializeLifecycle(async () => {
+			this.assertLifecycleActive(lifecycleGeneration);
+			const executions = this.getOrderedToolExecutions();
+			for (const execution of executions) {
+				if (!execution.result) {
+					throw new Error(`Restored tool "${execution.toolCallId}" did not produce a result`);
+				}
+			}
+
+			const restoredResults = new Map(
+				executions.map((execution) => [
+					execution.toolCallId,
+					agentToolResultToPiMessage(
+						execution.toolCallId,
+						execution.toolName,
+						this.restoreToolResult(execution.result as ToolExecutionResult),
+						(execution.result as ToolExecutionResult).isError,
+					),
+				]),
+			);
+			const trackedToolCallIds = new Set(restoredResults.keys());
+			const assistantBatch = this.findAssistantToolBatch(trackedToolCallIds);
+			if (assistantBatch) {
+				const batchToolCallIds = new Set(assistantBatch.toolCallIds);
+				const messagesAfterAssistant = this.agent.state.messages.slice(assistantBatch.messageIndex + 1);
+				const retainedResults = new Map(
+					messagesAfterAssistant.flatMap((message) =>
+						'role' in message && message.role === 'toolResult' && batchToolCallIds.has(message.toolCallId)
+							? [[message.toolCallId, message] as const]
+							: [],
+					),
+				);
+				const orderedResults = assistantBatch.toolCallIds.flatMap((toolCallId) => {
+					const result = restoredResults.get(toolCallId) ?? retainedResults.get(toolCallId);
+					return result ? [result] : [];
+				});
+				for (const execution of executions) {
+					if (!batchToolCallIds.has(execution.toolCallId)) {
+						const restoredResult = restoredResults.get(execution.toolCallId);
+						if (restoredResult) orderedResults.push(restoredResult);
+					}
+				}
+				const remainingMessages = messagesAfterAssistant.filter(
+					(message) =>
+						!(
+							'role' in message &&
+							message.role === 'toolResult' &&
+							batchToolCallIds.has(message.toolCallId)
+						),
+				);
+				this.agent.state.messages = [
+					...this.agent.state.messages.slice(0, assistantBatch.messageIndex + 1),
+					...orderedResults,
+					...remainingMessages,
+				];
+			} else {
+				const messagesWithoutTrackedResults = this.agent.state.messages.filter(
+					(message) =>
+						!('role' in message) ||
+						message.role !== 'toolResult' ||
+						!trackedToolCallIds.has(message.toolCallId),
+				);
+				this.agent.state.messages = [...messagesWithoutTrackedResults, ...restoredResults.values()];
+			}
+
+			// Persist all completed call records as a continuation-pending
+			// marker before allowing the next model request to start.
+			await this.persistLifecycleNow('tool_completed');
+			for (const execution of executions) {
+				this.toolExecutionStates.delete(execution.toolCallId);
+				this.tracker.executions.delete(execution.toolCallId);
+			}
+			this.refreshPendingRequests();
+		});
+	}
+
+	private findAssistantToolBatch(
+		trackedToolCallIds: ReadonlySet<string>,
+	): { messageIndex: number; toolCallIds: string[] } | undefined {
+		for (let messageIndex = this.agent.state.messages.length - 1; messageIndex >= 0; messageIndex--) {
+			const message = this.agent.state.messages[messageIndex];
+			if (!message || !('role' in message) || message.role !== 'assistant' || !Array.isArray(message.content)) {
+				continue;
+			}
+			const toolCallIds = message.content.flatMap((part) => (part.type === 'toolCall' ? [part.id] : []));
+			if (toolCallIds.some((toolCallId) => trackedToolCallIds.has(toolCallId))) {
+				return { messageIndex, toolCallIds };
 			}
 		}
-		await this.agent.continue();
+		return undefined;
 	}
 
 	private async executeRestoredTool(
@@ -706,32 +1025,152 @@ export class PiAgentInstance implements AgentInstance {
 		return tool.execute(execution.toolCallId, execution.input as never, this.abortController.signal);
 	}
 
-	private hasToolResult(toolCallId: string): boolean {
-		return this.agent.state.messages.some(
-			(message) => 'role' in message && message.role === 'toolResult' && message.toolCallId === toolCallId,
+	private createPiTools(lifecycleGeneration: number): PiAgentTool[] {
+		const toolRegistry = this.config.tools ?? createToolRegistry();
+		return buildPiTools(
+			toolRegistry.all(),
+			this.id,
+			this.config.guidance,
+			this.abortController.signal,
+			this.tracker,
+			// Progress callback
+			(_toolCallId, _toolName, _progress) => {
+				// Progress is emitted through events
+			},
+			// Suspension callback
+			(suspension) => this.handleSuspension(suspension, lifecycleGeneration),
+			// Get resume data
+			(toolCallId) =>
+				this.isCurrentLifecycleGeneration(lifecycleGeneration)
+					? this.toolExecutionStates.get(toolCallId)
+					: undefined,
+			// Persist the real tool result before Pi begins its next model turn.
+			(completion, result) => this.handleToolCompletion(completion, result, lifecycleGeneration),
+			// Register each call before user code mutates its isolated step state.
+			(execution) => this.handleToolStart(execution, lifecycleGeneration),
 		);
 	}
 
-	private async clearCompletedToolExecutions(): Promise<void> {
-		const cleared: ToolExecutionState[] = [];
-		const pendingBeforeCompletion = [...this.pendingRequests];
-		for (const [toolCallId, execution] of this.toolExecutionStates) {
-			if (execution.suspendedStep?.status === 'resolved' && this.hasToolResult(toolCallId)) {
-				this.toolExecutionStates.delete(toolCallId);
-				cleared.push(execution);
+	private storeToolResult(result: AgentToolResult<unknown>, isError = false): ToolExecutionResult {
+		return {
+			content: result.content,
+			details: result.details,
+			terminate: result.terminate,
+			isError,
+			completedAt: Date.now(),
+		};
+	}
+
+	private restoreToolResult(result: ToolExecutionResult): AgentToolResult<unknown> {
+		return {
+			content: result.content,
+			details: result.details,
+			terminate: result.terminate,
+		};
+	}
+
+	private serializeLifecycle<T>(operation: () => Promise<T> | T): Promise<T> {
+		const result = this.lifecycleTail.then(operation);
+		this.lifecycleTail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	}
+
+	private assertNotAborted(): void {
+		if (this.aborted) {
+			throw new Error('Agent aborted during tool lifecycle transition');
+		}
+	}
+
+	private assertLifecycleActive(lifecycleGeneration: number): void {
+		this.assertNotAborted();
+		if (!this.isCurrentLifecycleGeneration(lifecycleGeneration)) {
+			throw new Error('Tool lifecycle generation is no longer active');
+		}
+	}
+
+	private isCurrentLifecycleGeneration(lifecycleGeneration: number): boolean {
+		return lifecycleGeneration === this.lifecycleGeneration;
+	}
+
+	private parkFailedGeneration<T>(): Promise<T> {
+		return new Promise<T>(() => {});
+	}
+
+	private synchronizeTrackedSteps(): void {
+		for (const [toolCallId, tracked] of this.tracker.executions) {
+			const execution = this.toolExecutionStates.get(toolCallId);
+			if (execution && !execution.result) {
+				execution.completedSteps = tracked.stepContext.getCompletedSteps();
 			}
 		}
-		if (cleared.length === 0) return;
-		this.pendingRequests = this.pendingRequests.filter((request) =>
-			this.toolExecutionStates.has(request.toolCallId),
+	}
+
+	private refreshPendingRequests(): void {
+		this.pendingRequests = this.getOrderedToolExecutions()
+			.filter((execution) => execution.suspendedStep !== undefined && execution.result === undefined)
+			.map((execution) => this.executionToPendingRequest(execution));
+	}
+
+	private hasWaitingSuspensions(): boolean {
+		return [...this.toolExecutionStates.values()].some(
+			(execution) => execution.result === undefined && execution.suspendedStep?.status === 'waiting',
 		);
-		try {
-			await this.persistLifecycle('tool_completed');
-		} catch (error) {
-			for (const execution of cleared) this.toolExecutionStates.set(execution.toolCallId, execution);
-			this.pendingRequests = pendingBeforeCompletion;
-			throw error;
+	}
+
+	private areAllIncompleteExecutionsParked(): boolean {
+		let hasIncompleteExecution = false;
+		for (const execution of this.toolExecutionStates.values()) {
+			if (execution.result) continue;
+			hasIncompleteExecution = true;
+			if (execution.suspendedStep?.status !== 'waiting') return false;
 		}
+		return hasIncompleteExecution;
+	}
+
+	private isDurableBatch(): boolean {
+		return [...this.toolExecutionStates.values()].some((execution) => execution.suspendedStep !== undefined);
+	}
+
+	private hasOtherIncompleteExecution(toolCallId: string): boolean {
+		return [...this.toolExecutionStates.values()].some(
+			(execution) => execution.toolCallId !== toolCallId && execution.result === undefined,
+		);
+	}
+
+	private getOrderedToolExecutions(): ToolExecutionState[] {
+		return [...this.toolExecutionStates.values()].sort(
+			(left, right) =>
+				(left.sourceOrder ?? Number.MAX_SAFE_INTEGER) - (right.sourceOrder ?? Number.MAX_SAFE_INTEGER),
+		);
+	}
+
+	private getToolSourceOrder(toolCallId: string): number {
+		for (let index = this.agent.state.messages.length - 1; index >= 0; index--) {
+			const message = this.agent.state.messages[index];
+			if (!message || !('role' in message) || message.role !== 'assistant' || !Array.isArray(message.content)) {
+				continue;
+			}
+			const toolCalls = message.content.filter((part) => part.type === 'toolCall');
+			const sourceOrder = toolCalls.findIndex((part) => part.id === toolCallId);
+			if (sourceOrder >= 0) return sourceOrder;
+		}
+		return this.toolExecutionStates.size;
+	}
+
+	private publishSuspensionState(): void {
+		const status = this.areAllIncompleteExecutionsParked() ? 'waiting' : 'running';
+		if (this._status !== status) {
+			this._status = status;
+			this.activeEventQueue?.push({ type: 'status', status, timestamp: Date.now() });
+		}
+		this.activeEventQueue?.push({
+			type: 'suspended',
+			pendingRequests: [...this.pendingRequests],
+			timestamp: Date.now(),
+		});
 	}
 
 	private suspensionRequestToData(request: SuspensionRequest): SuspensionRequestData {

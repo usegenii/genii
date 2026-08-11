@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Destination } from '@genii/comms/destination/types';
-import type { OutboundIntent } from '@genii/comms/events/types';
+import type { InboundEvent, OutboundIntent } from '@genii/comms/events/types';
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { ChannelId } from '@genii/comms/types/core';
 import { PiAgentInstance } from '@genii/orchestrator/adapters/pi/instance';
@@ -370,7 +370,9 @@ describe('durable suspension daemon restart', () => {
 			payload: { conclusion: 'success' },
 		};
 		const acceptedHandle = await second.coordinator.restoreSuspended(sessionId, createAdapter(), { tools });
+		expect(acceptedHandle.status).toBe('waiting');
 		await acceptedHandle.resolve([resolution]);
+		expect(acceptedHandle.status).toBe('waiting');
 		const acceptedCheckpoint = await second.coordinator.loadCheckpoint(sessionId);
 		expect(acceptedCheckpoint?.toolExecutions[0]?.suspendedStep).toMatchObject({
 			status: 'resolved',
@@ -382,6 +384,11 @@ describe('durable suspension daemon restart', () => {
 		await second.router.stop();
 		await second.coordinator.shutdown();
 		await second.conversations.stop();
+		const acceptedAfterShutdown = await second.coordinator.loadCheckpoint(sessionId);
+		expect(acceptedAfterShutdown?.toolExecutions[0]?.suspendedStep).toMatchObject({
+			status: 'resolved',
+			resolution,
+		});
 
 		const third = createRuntime({
 			snapshotDirectory,
@@ -432,5 +439,631 @@ describe('durable suspension daemon restart', () => {
 		await third.router.stop();
 		await third.coordinator.shutdown();
 		await third.conversations.stop();
+	});
+
+	it('restores a partially completed parallel batch and continues the model exactly once', async () => {
+		temporaryDirectory = await mkdtemp(join(tmpdir(), 'genii-parallel-suspension-'));
+		const snapshotDirectory = join(temporaryDirectory, 'snapshots');
+		const conversationPath = join(temporaryDirectory, 'conversations.json');
+		const guidancePath = join(temporaryDirectory, 'guidance');
+		await mkdir(guidancePath, { recursive: true });
+
+		let completedSiblingExecutions = 0;
+		let firstPreparationCount = 0;
+		let secondPreparationCount = 0;
+		let modelContinuationCount = 0;
+		let modelCreationCount = 0;
+		let continuationToolCallIds: string[] = [];
+		const sent: SentIntent[] = [];
+		const completedSibling: Tool<unknown, unknown> = {
+			name: 'complete-immediately',
+			description: 'Complete while sibling tools are suspended',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			execute: async (input) => {
+				completedSiblingExecutions++;
+				return { status: 'success', output: { completed: true, owner: (input as { owner: string }).owner } };
+			},
+		};
+		const firstSuspendingTool: Tool<unknown, unknown> = {
+			name: 'wait-for-first-event',
+			description: 'Prepare once and wait for the first external event',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			canSuspend: true,
+			execute: async (input, context) => {
+				const owner = (input as { owner: string }).owner;
+				const prepared = await context.step.run('prepare-first', async () => {
+					firstPreparationCount++;
+					return `${owner}-prepared`;
+				});
+				const event = await context.step.waitForEvent('first.finished');
+				return { status: 'success', output: { owner, prepared, event } };
+			},
+		};
+		const secondSuspendingTool: Tool<unknown, unknown> = {
+			name: 'wait-for-second-event',
+			description: 'Prepare once and wait for the second external event',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			canSuspend: true,
+			execute: async (input, context) => {
+				const owner = (input as { owner: string }).owner;
+				const prepared = await context.step.run('prepare-second', async () => {
+					secondPreparationCount++;
+					return `${owner}-prepared`;
+				});
+				const event = await context.step.waitForEvent('second.finished');
+				return { status: 'success', output: { owner, prepared, event } };
+			},
+		};
+		const tools = createToolRegistryWith({}, completedSibling, firstSuspendingTool, secondSuspendingTool);
+		const streamFn: PiStreamFn = (_model, context) => {
+			const lastMessage = context.messages.at(-1);
+			if (lastMessage?.role === 'user') {
+				return streamFor(
+					assistantMessage(
+						[
+							{
+								type: 'toolCall',
+								id: 'complete-call',
+								name: completedSibling.name,
+								arguments: { owner: 'complete' },
+							},
+							{
+								type: 'toolCall',
+								id: 'first-call',
+								name: firstSuspendingTool.name,
+								arguments: { owner: 'first' },
+							},
+							{
+								type: 'toolCall',
+								id: 'second-call',
+								name: secondSuspendingTool.name,
+								arguments: { owner: 'second' },
+							},
+						],
+						'toolUse',
+					),
+				);
+			}
+			if (lastMessage?.role === 'toolResult') {
+				modelContinuationCount++;
+				continuationToolCallIds = context.messages.flatMap((message) =>
+					message.role === 'toolResult' ? [message.toolCallId] : [],
+				);
+				return streamFor(assistantMessage([{ type: 'text', text: 'Parallel batch finished.' }], 'stop'));
+			}
+			throw new Error(`Unexpected model history ending in ${lastMessage?.role ?? 'no message'}`);
+		};
+		const createAdapter = () =>
+			new CredentialFreePiAdapter(streamFn, () => {
+				modelCreationCount++;
+			});
+		const destination: Destination = {
+			channelId: 'parallel-test-channel' as ChannelId,
+			ref: 'parallel-conversation',
+		};
+
+		const first = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(first);
+		const firstHandle = await first.coordinator.spawn(createAdapter(), {
+			guidancePath,
+			input: { message: 'Run the parallel batch.' },
+			tools,
+		});
+		await first.conversations.bind(destination, firstHandle.id);
+		void firstHandle.start();
+
+		await vi.waitFor(async () => {
+			const pending = await first.coordinator.getPendingRequests(firstHandle.id);
+			expect(pending.map((request) => request.toolCallId)).toEqual(['first-call', 'second-call']);
+			const checkpoint = await first.coordinator.loadCheckpoint(firstHandle.id);
+			expect(checkpoint?.toolExecutions).toHaveLength(3);
+			expect(
+				checkpoint?.toolExecutions.find((execution) => execution.toolCallId === 'complete-call')?.result,
+			).toBeDefined();
+		});
+		const sessionId = firstHandle.id;
+		const partialCheckpoint = await first.coordinator.loadCheckpoint(sessionId);
+		if (!partialCheckpoint) throw new Error('Expected the partially completed batch checkpoint');
+		expect(partialCheckpoint.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+			'complete-call',
+			'first-call',
+			'second-call',
+		]);
+		expect(partialCheckpoint.messages.filter((message) => message.role === 'tool_result')).toEqual([]);
+		expect(completedSiblingExecutions).toBe(1);
+		expect(firstPreparationCount).toBe(1);
+		expect(secondPreparationCount).toBe(1);
+		expect(modelContinuationCount).toBe(0);
+
+		await first.router.stop();
+		await first.coordinator.shutdown();
+		await first.conversations.stop();
+
+		const second = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(second);
+		expect(second.conversations.getByAgent(sessionId)?.destination).toEqual(destination);
+		const restoredRequests = await second.coordinator.getPendingRequests(sessionId);
+		expect(restoredRequests.map((request) => request.toolCallId)).toEqual(['first-call', 'second-call']);
+		const firstRequest = restoredRequests.find((request) => request.toolCallId === 'first-call');
+		const secondRequest = restoredRequests.find((request) => request.toolCallId === 'second-call');
+		if (!firstRequest || !secondRequest) throw new Error('Expected both restored suspensions');
+
+		const laterSourceResolution = second.coordinator.resolveSuspensions(
+			sessionId,
+			[
+				{
+					suspensionId: secondRequest.suspensionId,
+					type: 'event',
+					payload: { sequence: 2 },
+				},
+			],
+			createAdapter(),
+			{ tools },
+		);
+		const earlierSourceResolution = second.coordinator.resolveSuspensions(
+			sessionId,
+			[
+				{
+					suspensionId: firstRequest.suspensionId,
+					type: 'event',
+					payload: { sequence: 1 },
+				},
+			],
+			createAdapter(),
+			{ tools },
+		);
+		const [laterHandle, earlierHandle] = await Promise.all([laterSourceResolution, earlierSourceResolution]);
+		expect(laterHandle).toBe(earlierHandle);
+		const result = await laterHandle.wait();
+		expect(result).toMatchObject({ status: 'completed', output: 'Parallel batch finished.' });
+
+		await vi.waitFor(async () => {
+			const checkpoint = await second.coordinator.loadCheckpoint(sessionId);
+			expect(checkpoint?.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'Parallel batch finished.' }]);
+		});
+		const finalCheckpoint = await second.coordinator.loadCheckpoint(sessionId);
+		if (!finalCheckpoint) throw new Error('Expected the completed parallel batch checkpoint');
+		expect(
+			finalCheckpoint.messages
+				.filter((message) => message.role === 'tool_result')
+				.map((message) => message.toolCallId),
+		).toEqual(['complete-call', 'first-call', 'second-call']);
+		const resultOutput = (toolCallId: string): unknown => {
+			const message = finalCheckpoint.messages.find(
+				(candidate) => candidate.role === 'tool_result' && candidate.toolCallId === toolCallId,
+			);
+			const content = message?.content[0];
+			if (content?.type !== 'text') throw new Error(`Expected text result for ${toolCallId}`);
+			return JSON.parse(content.text) as unknown;
+		};
+		expect(resultOutput('complete-call')).toEqual({ completed: true, owner: 'complete' });
+		expect(resultOutput('first-call')).toEqual({
+			owner: 'first',
+			prepared: 'first-prepared',
+			event: { sequence: 1 },
+		});
+		expect(resultOutput('second-call')).toEqual({
+			owner: 'second',
+			prepared: 'second-prepared',
+			event: { sequence: 2 },
+		});
+		expect(finalCheckpoint.toolExecutions).toEqual([]);
+		expect(await second.coordinator.getPendingRequests(sessionId)).toEqual([]);
+		expect(continuationToolCallIds).toEqual(['complete-call', 'first-call', 'second-call']);
+		expect(modelContinuationCount).toBe(1);
+		expect(completedSiblingExecutions).toBe(1);
+		expect(firstPreparationCount).toBe(1);
+		expect(secondPreparationCount).toBe(1);
+		expect(modelCreationCount).toBe(2);
+
+		await second.router.stop();
+		await second.coordinator.shutdown();
+		await second.conversations.stop();
+	});
+
+	it('parks a recovered continuation that suspends again without consuming triggering input', async () => {
+		temporaryDirectory = await mkdtemp(join(tmpdir(), 'genii-continuation-resuspend-'));
+		const snapshotDirectory = join(temporaryDirectory, 'snapshots');
+		const conversationPath = join(temporaryDirectory, 'conversations.json');
+		const guidancePath = join(temporaryDirectory, 'guidance');
+		await mkdir(guidancePath, { recursive: true });
+
+		let afterCrash = false;
+		let interruptedContinuationCount = 0;
+		let recoveredContinuationCount = 0;
+		let resumedContinuationCount = 0;
+		let unexpectedInboundCount = 0;
+		const sent: SentIntent[] = [];
+		const interruptedContinuation = new TestEventStream();
+		const firstTool: Tool<unknown, unknown> = {
+			name: 'first-restart-wait',
+			description: 'Create the continuation marker before restart',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			canSuspend: true,
+			execute: async (_input, context) => {
+				const event = await context.step.waitForEvent('first.finished');
+				return { status: 'success', output: event };
+			},
+		};
+		const secondTool: Tool<unknown, unknown> = {
+			name: 'second-restart-wait',
+			description: 'Suspend the recovered model continuation again',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			canSuspend: true,
+			execute: async (_input, context) => {
+				const event = await context.step.waitForEvent('second.finished');
+				return { status: 'success', output: event };
+			},
+		};
+		const tools = createToolRegistryWith({}, firstTool, secondTool);
+		const streamFn: PiStreamFn = (_model, context) => {
+			const lastMessage = context.messages.at(-1);
+			if (lastMessage?.role === 'user') {
+				if (afterCrash) {
+					unexpectedInboundCount++;
+					return streamFor(assistantMessage([{ type: 'text', text: 'Unexpected inbound turn.' }], 'stop'));
+				}
+				return streamFor(
+					assistantMessage(
+						[{ type: 'toolCall', id: 'first-restart-call', name: firstTool.name, arguments: {} }],
+						'toolUse',
+					),
+				);
+			}
+			if (lastMessage?.role === 'toolResult' && !afterCrash) {
+				interruptedContinuationCount++;
+				return interruptedContinuation as unknown as StreamReturn;
+			}
+			if (lastMessage?.role === 'toolResult' && lastMessage.toolCallId === 'first-restart-call') {
+				recoveredContinuationCount++;
+				return streamFor(
+					assistantMessage(
+						[{ type: 'toolCall', id: 'second-restart-call', name: secondTool.name, arguments: {} }],
+						'toolUse',
+					),
+				);
+			}
+			if (lastMessage?.role === 'toolResult' && lastMessage.toolCallId === 'second-restart-call') {
+				resumedContinuationCount++;
+				return streamFor(assistantMessage([{ type: 'text', text: 'Second wait completed.' }], 'stop'));
+			}
+			throw new Error(`Unexpected model history ending in ${lastMessage?.role ?? 'no message'}`);
+		};
+		const createAdapter = () => new CredentialFreePiAdapter(streamFn, () => {});
+		const destination: Destination = {
+			channelId: 'resuspend-test-channel' as ChannelId,
+			ref: 'resuspend-conversation',
+		};
+
+		const first = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(first);
+		const firstHandle = await first.coordinator.spawn(createAdapter(), {
+			guidancePath,
+			input: { message: 'Begin the restart sequence.' },
+			tools,
+		});
+		await first.conversations.bind(destination, firstHandle.id);
+		void firstHandle.start();
+
+		await vi.waitFor(() => expect(firstHandle.getPendingRequests()).toHaveLength(1));
+		const [firstPending] = firstHandle.getPendingRequests();
+		if (!firstPending) throw new Error('Expected the first suspension');
+		await firstHandle.resolve([
+			{ suspensionId: firstPending.suspensionId, type: 'event', payload: { first: 'done' } },
+		]);
+		await vi.waitFor(async () => {
+			const savedCheckpoint = await first.coordinator.loadCheckpoint(firstHandle.id);
+			expect(savedCheckpoint?.phase).toBe('continuation_pending');
+			expect(savedCheckpoint?.toolExecutions.every((execution) => execution.result !== undefined)).toBe(true);
+		});
+		const sessionId = firstHandle.id;
+		expect(interruptedContinuationCount).toBe(1);
+
+		await first.router.stop();
+		await first.conversations.stop();
+		afterCrash = true;
+
+		const second = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(second);
+		const inbound: InboundEvent = {
+			type: 'message_received',
+			origin: { ...destination, metadata: { conversationType: 'direct' } },
+			author: { id: 'resuspend-user', username: 'resuspend-user', isBot: false },
+			content: { type: 'text', text: 'This input must remain unconsumed.' },
+			timestamp: Date.now(),
+		};
+
+		await second.router.handleInbound(inbound, destination.channelId);
+
+		const waitingHandle = second.coordinator.get(sessionId);
+		if (!waitingHandle) throw new Error('Expected the recovered waiting handle');
+		expect(waitingHandle.status).toBe('waiting');
+		expect(waitingHandle.getPendingRequests()).toMatchObject([
+			{ toolCallId: 'second-restart-call', status: 'waiting' },
+		]);
+		const parkedCheckpoint = await second.coordinator.loadCheckpoint(sessionId);
+		expect(parkedCheckpoint?.phase).toBe('batch_pending');
+		expect(parkedCheckpoint?.toolExecutions).toMatchObject([
+			{ toolCallId: 'second-restart-call', suspendedStep: { status: 'waiting' } },
+		]);
+		expect(
+			parkedCheckpoint?.messages
+				.filter((message) => message.role === 'user')
+				.flatMap((message) =>
+					message.content.flatMap((content) => (content.type === 'text' ? [content.text] : [])),
+				),
+		).toEqual(['Begin the restart sequence.']);
+		expect(recoveredContinuationCount).toBe(1);
+		expect(unexpectedInboundCount).toBe(0);
+		expect(
+			sent.some(
+				({ intent }) =>
+					intent.type === 'agent_responding' &&
+					intent.content.type === 'text' &&
+					intent.content.text.includes('waiting'),
+			),
+		).toBe(true);
+
+		const [secondPending] = waitingHandle.getPendingRequests();
+		if (!secondPending) throw new Error('Expected the second suspension');
+		await second.coordinator.resolveSuspensions(
+			sessionId,
+			[{ suspensionId: secondPending.suspensionId, type: 'event', payload: { second: 'done' } }],
+			createAdapter(),
+			{ tools },
+		);
+		await expect(waitingHandle.wait()).resolves.toMatchObject({
+			status: 'completed',
+			output: 'Second wait completed.',
+		});
+		await vi.waitFor(async () => {
+			const finalCheckpoint = await second.coordinator.loadCheckpoint(sessionId);
+			expect(finalCheckpoint?.toolExecutions).toEqual([]);
+			expect(finalCheckpoint?.messages.at(-1)?.content).toEqual([
+				{ type: 'text', text: 'Second wait completed.' },
+			]);
+		});
+		expect(recoveredContinuationCount).toBe(1);
+		expect(resumedContinuationCount).toBe(1);
+		expect(unexpectedInboundCount).toBe(0);
+
+		await second.router.stop();
+		await second.coordinator.shutdown({ graceful: false, timeoutMs: 1000 });
+		await second.conversations.stop();
+	});
+
+	it('recovers a committed batch marker before processing new conversation input', async () => {
+		temporaryDirectory = await mkdtemp(join(tmpdir(), 'genii-continuation-marker-'));
+		const snapshotDirectory = join(temporaryDirectory, 'snapshots');
+		const conversationPath = join(temporaryDirectory, 'conversations.json');
+		const guidancePath = join(temporaryDirectory, 'guidance');
+		await mkdir(guidancePath, { recursive: true });
+
+		let afterCrash = false;
+		let completedSiblingExecutions = 0;
+		let waitingToolInvocations = 0;
+		let preparationCount = 0;
+		let interruptedContinuationCount = 0;
+		let recoveredContinuationCount = 0;
+		let inboundTurnCount = 0;
+		const recoveredModelOrder: string[] = [];
+		const sent: SentIntent[] = [];
+		const interruptedContinuation = new TestEventStream();
+		const completedSibling: Tool<unknown, unknown> = {
+			name: 'marker-completed-sibling',
+			description: 'Complete before the durable sibling resumes',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			execute: async () => {
+				completedSiblingExecutions++;
+				return { status: 'success', output: 'completed-before-crash' };
+			},
+		};
+		const waitingTool: Tool<unknown, unknown> = {
+			name: 'marker-waiting-sibling',
+			description: 'Suspend once so the completed batch receives a durable marker',
+			parameters: { type: 'object', properties: {} } as unknown as Tool<unknown, unknown>['parameters'],
+			canSuspend: true,
+			execute: async (_input, context) => {
+				waitingToolInvocations++;
+				const prepared = await context.step.run('prepare-marker', async () => {
+					preparationCount++;
+					return 'prepared-once';
+				});
+				const event = await context.step.waitForEvent('marker.finished');
+				return { status: 'success', output: { prepared, event } };
+			},
+		};
+		const tools = createToolRegistryWith({}, completedSibling, waitingTool);
+		const streamFn: PiStreamFn = (_model, context) => {
+			const lastMessage = context.messages.at(-1);
+			if (lastMessage?.role === 'user' && !afterCrash) {
+				return streamFor(
+					assistantMessage(
+						[
+							{
+								type: 'toolCall',
+								id: 'marker-completed-call',
+								name: completedSibling.name,
+								arguments: {},
+							},
+							{
+								type: 'toolCall',
+								id: 'marker-waiting-call',
+								name: waitingTool.name,
+								arguments: {},
+							},
+						],
+						'toolUse',
+					),
+				);
+			}
+			if (lastMessage?.role === 'toolResult' && !afterCrash) {
+				interruptedContinuationCount++;
+				return interruptedContinuation as unknown as StreamReturn;
+			}
+			if (lastMessage?.role === 'toolResult') {
+				recoveredContinuationCount++;
+				recoveredModelOrder.push('recovered-continuation');
+				return streamFor(assistantMessage([{ type: 'text', text: 'Recovered committed batch.' }], 'stop'));
+			}
+			if (lastMessage?.role === 'user') {
+				inboundTurnCount++;
+				recoveredModelOrder.push('inbound-turn');
+				return streamFor(assistantMessage([{ type: 'text', text: 'Processed input after recovery.' }], 'stop'));
+			}
+			throw new Error(`Unexpected model history ending in ${lastMessage?.role ?? 'no message'}`);
+		};
+		const createAdapter = () => new CredentialFreePiAdapter(streamFn, () => {});
+		const destination: Destination = {
+			channelId: 'marker-test-channel' as ChannelId,
+			ref: 'marker-conversation',
+		};
+
+		const first = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(first);
+		const firstHandle = await first.coordinator.spawn(createAdapter(), {
+			guidancePath,
+			input: { message: 'Create a committed batch marker.' },
+			tools,
+		});
+		await first.conversations.bind(destination, firstHandle.id);
+		void firstHandle.start();
+
+		await vi.waitFor(() => expect(firstHandle.getPendingRequests()).toHaveLength(1));
+		const [pending] = firstHandle.getPendingRequests();
+		if (!pending) throw new Error('Expected the marker-producing suspension');
+		await firstHandle.resolve([
+			{
+				suspensionId: pending.suspensionId,
+				type: 'event',
+				payload: { marker: 'complete' },
+			},
+		]);
+
+		await vi.waitFor(async () => {
+			expect(interruptedContinuationCount).toBe(1);
+			const checkpoint = await first.coordinator.loadCheckpoint(firstHandle.id);
+			expect(checkpoint?.phase).toBe('continuation_pending');
+			expect(checkpoint?.toolExecutions).toHaveLength(2);
+			expect(checkpoint?.toolExecutions.every((execution) => execution.result !== undefined)).toBe(true);
+			expect(
+				checkpoint?.messages
+					.filter((message) => message.role === 'tool_result')
+					.map((message) => message.toolCallId),
+			).toEqual(['marker-completed-call', 'marker-waiting-call']);
+		});
+		const sessionId = firstHandle.id;
+		expect(completedSiblingExecutions).toBe(1);
+		expect(waitingToolInvocations).toBe(2);
+		expect(preparationCount).toBe(1);
+
+		// Leave the first coordinator's provider request unresolved to model an
+		// abrupt process loss without writing a newer terminal checkpoint.
+		await first.router.stop();
+		await first.conversations.stop();
+		afterCrash = true;
+
+		const second = createRuntime({
+			snapshotDirectory,
+			conversationPath,
+			guidancePath,
+			adapter: createAdapter(),
+			tools,
+			sent,
+		});
+		await startRuntime(second);
+		expect(second.conversations.getByDestination(destination)?.agentId).toBe(sessionId);
+		const inbound: InboundEvent = {
+			type: 'message_received',
+			origin: {
+				...destination,
+				metadata: { conversationType: 'direct' },
+			},
+			author: { id: 'marker-user', username: 'marker-user', isBot: false },
+			content: { type: 'text', text: 'Handle this only after recovering the batch.' },
+			timestamp: Date.now(),
+		};
+		await second.router.handleInbound(inbound, destination.channelId);
+
+		await vi.waitFor(async () => {
+			expect(recoveredModelOrder).toEqual(['recovered-continuation', 'inbound-turn']);
+			const checkpoint = await second.coordinator.loadCheckpoint(sessionId);
+			expect(checkpoint?.messages.at(-1)?.content).toEqual([
+				{ type: 'text', text: 'Processed input after recovery.' },
+			]);
+		});
+		const finalCheckpoint = await second.coordinator.loadCheckpoint(sessionId);
+		if (!finalCheckpoint) throw new Error('Expected the post-recovery checkpoint');
+		expect(finalCheckpoint.session.id).toBe(sessionId);
+		expect(finalCheckpoint.phase).toBeUndefined();
+		expect(second.conversations.getByDestination(destination)?.agentId).toBe(sessionId);
+		expect(finalCheckpoint.toolExecutions).toEqual([]);
+		expect(
+			finalCheckpoint.messages
+				.filter((message) => message.role === 'tool_result')
+				.map((message) => message.toolCallId),
+		).toEqual(['marker-completed-call', 'marker-waiting-call']);
+		expect(
+			finalCheckpoint.messages
+				.filter((message) => message.role === 'assistant')
+				.flatMap((message) =>
+					message.content.flatMap((content) => (content.type === 'text' ? [content.text] : [])),
+				),
+		).toEqual(['Recovered committed batch.', 'Processed input after recovery.']);
+		expect(
+			finalCheckpoint.messages
+				.filter((message) => message.role === 'user')
+				.flatMap((message) =>
+					message.content.flatMap((content) => (content.type === 'text' ? [content.text] : [])),
+				),
+		).toEqual(['Create a committed batch marker.', 'Handle this only after recovering the batch.']);
+		expect(recoveredContinuationCount).toBe(1);
+		expect(inboundTurnCount).toBe(1);
+		expect(completedSiblingExecutions).toBe(1);
+		expect(waitingToolInvocations).toBe(2);
+		expect(preparationCount).toBe(1);
+		const responseTexts = sent.flatMap(({ intent }) =>
+			intent.type === 'agent_responding' && intent.content.type === 'text' ? [intent.content.text] : [],
+		);
+		expect(responseTexts).toEqual(['Recovered committed batch.', 'Processed input after recovery.']);
+
+		await second.router.stop();
+		await second.coordinator.shutdown();
+		await second.conversations.stop();
 	});
 });

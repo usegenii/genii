@@ -13,7 +13,7 @@ import type { Logger } from '../logging/logger';
 /**
  * Shutdown mode determines how handlers are executed.
  * - 'graceful': Wait for all handlers to complete
- * - 'hard': Use a timeout per priority level
+ * - 'hard': Use a timeout per priority level, except explicit ordering barriers
  */
 export type ShutdownMode = 'graceful' | 'hard';
 
@@ -23,14 +23,25 @@ export type ShutdownMode = 'graceful' | 'hard';
 export interface ShutdownHandler {
 	name: string;
 	priority: number;
+	waitOnHardTimeout: boolean;
 	execute(mode: ShutdownMode): Promise<void>;
+}
+
+export interface ShutdownHandlerOptions {
+	/** Preserve the priority barrier after warning that the hard timeout elapsed. */
+	waitOnHardTimeout?: boolean;
 }
 
 /**
  * ShutdownManager interface for coordinating daemon shutdown.
  */
 export interface IShutdownManager {
-	register(name: string, handler: (mode: ShutdownMode) => Promise<void>, priority: number): void;
+	register(
+		name: string,
+		handler: (mode: ShutdownMode) => Promise<void>,
+		priority: number,
+		options?: ShutdownHandlerOptions,
+	): void;
 	unregister(name: string): void;
 	execute(mode: ShutdownMode): Promise<void>;
 	readonly isShuttingDown: boolean;
@@ -79,7 +90,12 @@ export class ShutdownManager implements IShutdownManager {
 	 * @param handler - The handler function to execute during shutdown
 	 * @param priority - Priority level (lower numbers execute first)
 	 */
-	register(name: string, handler: (mode: ShutdownMode) => Promise<void>, priority: number): void {
+	register(
+		name: string,
+		handler: (mode: ShutdownMode) => Promise<void>,
+		priority: number,
+		options: ShutdownHandlerOptions = {},
+	): void {
 		if (this._handlers.has(name)) {
 			this._logger.warn({ name }, 'Replacing existing shutdown handler');
 		}
@@ -87,6 +103,7 @@ export class ShutdownManager implements IShutdownManager {
 		this._handlers.set(name, {
 			name,
 			priority,
+			waitOnHardTimeout: options.waitOnHardTimeout ?? false,
 			execute: handler,
 		});
 
@@ -172,21 +189,35 @@ export class ShutdownManager implements IShutdownManager {
 		const handlerNames = handlers.map((h) => h.name);
 		this._logger.debug({ priority, handlers: handlerNames }, 'Executing priority level');
 
-		const executePromises = handlers.map((handler) => this._executeHandler(handler, mode));
+		const executions = handlers.map((handler) => ({
+			handler,
+			promise: this._executeHandler(handler, mode),
+		}));
+		const executePromises = executions.map(({ promise }) => promise);
 
 		if (mode === 'graceful') {
 			// In graceful mode, wait for all handlers to complete
 			await Promise.all(executePromises);
 		} else {
 			// In hard mode, use a timeout per priority level
+			let timeout: ReturnType<typeof setTimeout> | undefined;
 			const timeoutPromise = new Promise<void>((resolve) => {
-				setTimeout(() => {
+				timeout = setTimeout(() => {
 					this._logger.warn({ priority, timeoutMs: this._config.hardTimeoutMs }, 'Priority level timed out');
 					resolve();
 				}, this._config.hardTimeoutMs);
 			});
 
-			await Promise.race([Promise.all(executePromises), timeoutPromise]);
+			const completedWithinTimeout = await Promise.race([
+				Promise.all(executePromises).then(() => true as const),
+				timeoutPromise.then(() => false as const),
+			]);
+			if (timeout !== undefined) clearTimeout(timeout);
+			if (!completedWithinTimeout) {
+				await Promise.all(
+					executions.filter(({ handler }) => handler.waitOnHardTimeout).map(({ promise }) => promise),
+				);
+			}
 		}
 
 		this._logger.debug({ priority }, 'Priority level complete');

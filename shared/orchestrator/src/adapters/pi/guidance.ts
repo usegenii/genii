@@ -130,6 +130,13 @@ export interface ToolCompletionContext {
 	completedSteps: CompletedStep[];
 }
 
+/** Snapshot of a tool invocation before user code begins. */
+export interface ToolStartContext {
+	toolCallId: string;
+	toolName: string;
+	input: unknown;
+}
+
 /**
  * Create a tool execution tracker.
  */
@@ -152,9 +159,21 @@ export function buildPiTools(
 	onSuspend?: (suspension: ToolSuspensionContext) => Promise<StepResumeData>,
 	getResumeData?: (toolCallId: string) => ToolExecutionState | undefined,
 	onComplete?: (completion: ToolCompletionContext, result: AgentToolResult<unknown>) => Promise<void>,
+	onStart?: (execution: ToolStartContext) => Promise<void>,
 ): PiAgentTool<TSchema>[] {
 	return tools.map((tool) =>
-		convertTool(tool, sessionId, guidance, abortSignal, tracker, onProgress, onSuspend, getResumeData, onComplete),
+		convertTool(
+			tool,
+			sessionId,
+			guidance,
+			abortSignal,
+			tracker,
+			onProgress,
+			onSuspend,
+			getResumeData,
+			onComplete,
+			onStart,
+		),
 	);
 }
 
@@ -171,6 +190,7 @@ function convertTool(
 	onSuspend?: (suspension: ToolSuspensionContext) => Promise<StepResumeData>,
 	getResumeData?: (toolCallId: string) => ToolExecutionState | undefined,
 	onComplete?: (completion: ToolCompletionContext, result: AgentToolResult<unknown>) => Promise<void>,
+	onStart?: (execution: ToolStartContext) => Promise<void>,
 ): PiAgentTool<TSchema> {
 	return {
 		name: tool.name,
@@ -183,6 +203,7 @@ function convertTool(
 			signal?: AbortSignal,
 			onUpdate?: (partialResult: AgentToolResult<unknown>) => void,
 		): Promise<AgentToolResult<unknown>> => {
+			await onStart?.({ toolCallId, toolName: tool.name, input: params });
 			let completedSteps = getResumeData?.(toolCallId)?.completedSteps ?? [];
 			let resumeData = getResumeData?.(toolCallId)?.suspendedStep?.resumeData;
 

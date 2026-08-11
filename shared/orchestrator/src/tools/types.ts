@@ -273,8 +273,26 @@ export interface ToolExecutionState {
 	toolName: string;
 	toolCallId: string;
 	input: unknown;
+	/** Position of this call in the assistant message's tool-call batch. */
+	sourceOrder?: number | undefined;
 	completedSteps: CompletedStep[];
-	suspendedStep?: SuspendedStep;
+	suspendedStep?: SuspendedStep | undefined;
+	/** Durable wrapper result retained until Pi crosses the batch barrier. */
+	result?: ToolExecutionResult | undefined;
+}
+
+/** Provider-neutral content stored for a completed tool wrapper. */
+export type ToolExecutionResultContent =
+	| { type: 'text'; text: string }
+	| { type: 'image'; data: string; mimeType: string };
+
+/** A completed wrapper result that can be restored without re-execution. */
+export interface ToolExecutionResult {
+	content: ToolExecutionResultContent[];
+	details?: unknown;
+	terminate?: boolean | undefined;
+	isError: boolean;
+	completedAt: number;
 }
 
 /**

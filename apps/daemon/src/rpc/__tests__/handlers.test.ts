@@ -41,6 +41,7 @@ function createMockCoordinator(): Coordinator {
 		shutdown: vi.fn(),
 		spawn: vi.fn(),
 		continue: vi.fn(),
+		resumeContinuation: vi.fn(),
 		getPendingRequests: vi.fn(),
 		restoreSuspended: vi.fn(),
 		resolveSuspensions: vi.fn(),

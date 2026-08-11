@@ -9,6 +9,9 @@ import type { AgentSessionId, PartialAgentMetrics } from '../types/core';
 /** Current persisted checkpoint schema. */
 export const CHECKPOINT_VERSION = 1 as const;
 
+/** Durable work which must complete before the session accepts new input. */
+export type CheckpointPhase = 'batch_pending' | 'continuation_pending';
+
 // Re-export for convenience
 export type { GuidanceCheckpoint, MemoryWrite, ToolExecutionState };
 
@@ -63,6 +66,8 @@ export interface CheckpointAdapterConfig extends InstanceAdapterConfig {
 export interface InstanceCheckpoint {
 	/** Schema version. Unversioned checkpoints are accepted as legacy data. */
 	version?: typeof CHECKPOINT_VERSION;
+	/** Explicit recovery phase for a checkpoint that is not a completed turn. */
+	phase?: CheckpointPhase;
 	/** When the checkpoint was taken */
 	timestamp: number;
 	/** Name of the adapter that created this agent */

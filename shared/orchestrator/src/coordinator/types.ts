@@ -70,6 +70,17 @@ export interface Coordinator {
 	): Promise<AgentHandle>;
 
 	/**
+	 * Recover a committed tool batch and run its pending model continuation.
+	 * Returns at completion or at a new fully parked durable wait. This never
+	 * appends ordinary user input to the recovered turn.
+	 */
+	resumeContinuation(
+		sessionId: AgentSessionId,
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle>;
+
+	/**
 	 * Inspect pending requests without restoring a dormant model instance.
 	 */
 	getPendingRequests(sessionId: AgentSessionId): Promise<PendingRequestInfo[]>;
