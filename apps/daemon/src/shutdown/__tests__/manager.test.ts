@@ -277,6 +277,42 @@ describe('ShutdownManager', () => {
 			// Very slow handler should have been timed out
 			expect(logger.warn).toHaveBeenCalled();
 		});
+
+		it('keeps opted-in hard-timeout handlers as an ordering barrier', async () => {
+			vi.useFakeTimers();
+			try {
+				const logger = createMockLogger();
+				const manager = new ShutdownManager(logger, { hardTimeoutMs: 50 });
+				let releaseBarrier: () => void = () => undefined;
+				const barrier = new Promise<void>((resolve) => {
+					releaseBarrier = resolve;
+				});
+				const laterHandler = vi.fn().mockResolvedValue(undefined);
+
+				manager.register(
+					'route-drain',
+					async () => {
+						await barrier;
+					},
+					20,
+					{ waitOnHardTimeout: true },
+				);
+				manager.register('coordinator', laterHandler, 30);
+
+				const shutdown = manager.execute('hard');
+				await vi.advanceTimersByTimeAsync(50);
+
+				expect(logger.warn).toHaveBeenCalledWith({ priority: 20, timeoutMs: 50 }, 'Priority level timed out');
+				expect(laterHandler).not.toHaveBeenCalled();
+
+				releaseBarrier();
+				await shutdown;
+				expect(laterHandler).toHaveBeenCalledTimes(1);
+			} finally {
+				vi.clearAllTimers();
+				vi.useRealTimers();
+			}
+		});
 	});
 
 	describe('isShuttingDown', () => {

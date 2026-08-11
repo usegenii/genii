@@ -4,10 +4,12 @@
 
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { ModelFactory } from '@genii/models/factory';
+import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { PendingRequestInfo, PendingResolution } from '@genii/orchestrator/events/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
-import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { SuspensionId, ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
@@ -39,6 +41,10 @@ function createMockCoordinator(): Coordinator {
 		shutdown: vi.fn(),
 		spawn: vi.fn(),
 		continue: vi.fn(),
+		resumeContinuation: vi.fn(),
+		getPendingRequests: vi.fn(),
+		restoreSuspended: vi.fn(),
+		resolveSuspensions: vi.fn(),
 		get: vi.fn(),
 		getAdapter: vi.fn(),
 		list: vi.fn(() => []),
@@ -232,6 +238,193 @@ describe('RPC Handlers', () => {
 			});
 			expect(mockHandle.start).toHaveBeenCalledOnce();
 			expect(result).toEqual({ id: 'spawned-without-tools' });
+		});
+	});
+
+	describe('conversation persistence', () => {
+		it('waits for an unbind to be persisted before acknowledging it', async () => {
+			let releasePersistence: (() => void) | undefined;
+			const unbind = vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						releasePersistence = resolve;
+					}),
+			);
+			const conversationManager = { unbind } as unknown as ConversationManager;
+			const context = createMockContext({ conversationManager });
+			const handler = getHandler(createHandlers(context), 'conversation.unbind');
+			const destination = { channelId: 'telegram', ref: 'chat-1' };
+
+			let acknowledged = false;
+			const result = handler({ destination }, context).then((value) => {
+				acknowledged = true;
+				return value;
+			});
+			await Promise.resolve();
+
+			expect(unbind).toHaveBeenCalledWith(destination);
+			expect(acknowledged).toBe(false);
+
+			releasePersistence?.();
+			await expect(result).resolves.toEqual({ ok: true });
+		});
+	});
+
+	describe('durable suspension control plane', () => {
+		it('inspects pending requests without creating a model adapter', async () => {
+			const coordinator = createMockCoordinator();
+			const modelFactory = createMockModelFactory();
+			const pendingRequest: PendingRequestInfo = {
+				suspensionId: 'suspension-1' as SuspensionId,
+				toolCallId: 'tool-call-1',
+				toolName: 'wait_for_build',
+				stepId: 'wait-for-build',
+				type: 'approval',
+				request: {
+					type: 'approval',
+					action: 'deploy',
+					details: { buildNumber: 42n },
+				},
+				suspendedAt: 123,
+				deadline: 456,
+				status: 'resolved',
+			};
+			vi.mocked(coordinator.getPendingRequests).mockResolvedValue([pendingRequest]);
+
+			const context = createMockContext({ coordinator, modelFactory });
+			const handler = getHandler(createHandlers(context), 'agent.pendingRequests');
+
+			await expect(handler({ sessionId: 'session-1' }, context)).resolves.toEqual([
+				{
+					suspensionId: 'suspension-1',
+					toolCallId: 'tool-call-1',
+					toolName: 'wait_for_build',
+					stepId: 'wait-for-build',
+					type: 'approval',
+					request: {
+						type: 'approval',
+						action: 'deploy',
+						details: { buildNumber: '42' },
+					},
+					suspendedAt: 123,
+					deadline: 456,
+					status: 'resolved',
+				},
+			]);
+			expect(coordinator.getPendingRequests).toHaveBeenCalledWith('session-1');
+			expect(modelFactory.createAdapter).not.toHaveBeenCalled();
+		});
+
+		it('restores the checkpoint model and resolves without spawning a replacement agent', async () => {
+			const coordinator = createMockCoordinator();
+			const modelFactory = createMockModelFactory();
+			const toolRegistry = createMockToolRegistry();
+			const checkpoint = createMockCheckpoint('session-2');
+			checkpoint.adapterConfig = {
+				provider: 'anthropic',
+				model: 'claude-3-opus',
+				thinkingLevel: 'high',
+			};
+			const handle = createMockAgentHandle('session-2');
+			const resolutions: PendingResolution[] = [
+				{
+					suspensionId: 'suspension-2' as SuspensionId,
+					type: 'approval',
+					approved: false,
+					reason: 'Not safe yet',
+				},
+			];
+			vi.mocked(coordinator.loadCheckpoint).mockResolvedValue(checkpoint);
+			vi.mocked(coordinator.resolveSuspensions).mockResolvedValue(handle);
+
+			const context = createMockContext({ coordinator, modelFactory, toolRegistry });
+			const handler = getHandler(createHandlers(context), 'agent.resolveSuspensions');
+
+			await expect(handler({ sessionId: 'session-2', resolutions }, context)).resolves.toEqual({
+				id: 'session-2',
+			});
+			expect(modelFactory.createAdapter).toHaveBeenCalledWith('anthropic/claude-3-opus', {
+				thinkingLevel: 'high',
+			});
+			expect(coordinator.resolveSuspensions).toHaveBeenCalledWith('session-2', resolutions, expect.any(Object), {
+				tools: toolRegistry,
+			});
+			expect(coordinator.spawn).not.toHaveBeenCalled();
+			expect(coordinator.continue).not.toHaveBeenCalled();
+		});
+
+		it('resolves a warm suspension without loading a checkpoint or creating another adapter', async () => {
+			const coordinator = createMockCoordinator();
+			const adapter = {
+				name: 'warm',
+				modelProvider: 'anthropic',
+				modelName: 'claude-warm',
+			} as AgentAdapter;
+			const handle = createMockAgentHandle('warm-session');
+			const resolutions: PendingResolution[] = [
+				{ suspensionId: 'warm-suspension' as SuspensionId, type: 'sleep' },
+			];
+			vi.mocked(coordinator.getAdapter).mockReturnValue(adapter);
+			vi.mocked(coordinator.resolveSuspensions).mockResolvedValue(handle);
+			const context = createMockContext({ coordinator, modelFactory: undefined });
+			const handler = getHandler(createHandlers(context), 'agent.resolveSuspensions');
+
+			await expect(handler({ sessionId: 'warm-session', resolutions }, context)).resolves.toEqual({
+				id: 'warm-session',
+			});
+			expect(coordinator.loadCheckpoint).not.toHaveBeenCalled();
+			expect(coordinator.resolveSuspensions).toHaveBeenCalledWith('warm-session', resolutions, adapter, {
+				tools: undefined,
+			});
+		});
+
+		it('rejects a malformed resolution before loading an adapter', async () => {
+			const coordinator = createMockCoordinator();
+			const modelFactory = createMockModelFactory();
+			const context = createMockContext({ coordinator, modelFactory });
+			const handler = getHandler(createHandlers(context), 'agent.resolveSuspensions');
+
+			await expect(
+				handler(
+					{
+						sessionId: 'session-1',
+						resolutions: [{ suspensionId: 'suspension-1', type: 'approval', approved: 'yes' }],
+					},
+					context,
+				),
+			).rejects.toThrow('"approved" must be a boolean');
+			expect(coordinator.getAdapter).not.toHaveBeenCalled();
+			expect(coordinator.loadCheckpoint).not.toHaveBeenCalled();
+			expect(modelFactory.createAdapter).not.toHaveBeenCalled();
+			expect(coordinator.resolveSuspensions).not.toHaveBeenCalled();
+		});
+
+		it('rejects a non-array resolution collection', async () => {
+			const coordinator = createMockCoordinator();
+			const context = createMockContext({ coordinator });
+			const handler = getHandler(createHandlers(context), 'agent.resolveSuspensions');
+
+			await expect(handler({ sessionId: 'session-1', resolutions: { type: 'sleep' } }, context)).rejects.toThrow(
+				'expected an array',
+			);
+			expect(coordinator.getAdapter).not.toHaveBeenCalled();
+			expect(coordinator.resolveSuspensions).not.toHaveBeenCalled();
+		});
+
+		it('fails resolution when the original checkpoint is missing', async () => {
+			const coordinator = createMockCoordinator();
+			const modelFactory = createMockModelFactory();
+			vi.mocked(coordinator.loadCheckpoint).mockResolvedValue(null);
+
+			const context = createMockContext({ coordinator, modelFactory });
+			const handler = getHandler(createHandlers(context), 'agent.resolveSuspensions');
+			const resolutions: PendingResolution[] = [{ suspensionId: 'missing' as SuspensionId, type: 'sleep' }];
+
+			await expect(handler({ sessionId: 'missing-session', resolutions }, context)).rejects.toThrow(
+				'Checkpoint not found for session: missing-session',
+			);
+			expect(modelFactory.createAdapter).not.toHaveBeenCalled();
+			expect(coordinator.resolveSuspensions).not.toHaveBeenCalled();
 		});
 	});
 

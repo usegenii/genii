@@ -277,7 +277,7 @@ class MockAgentInstance implements AgentInstance {
 		return this.pendingRequests;
 	}
 
-	resolve(resolutions: PendingResolution[]): void {
+	async resolve(resolutions: PendingResolution[]): Promise<void> {
 		this.pendingResolutions.push(...resolutions);
 	}
 

@@ -27,6 +27,7 @@ import type {
 } from '@genii/lib/rpc/methods';
 import type { ModelFactory } from '@genii/models/factory';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import { assertSuspensionResolution } from '@genii/orchestrator/tools/suspension';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
@@ -35,6 +36,7 @@ import { executeOnboard, getOnboardStatus } from '../onboard';
 import type { SchedulerLifecycle } from '../scheduler/types';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
 import type { TransportConnection } from '../transport/types';
+import { toRpcPendingRequestInfo } from './event-journal';
 import type { SubscriptionManager } from './subscriptions';
 
 // =============================================================================
@@ -140,6 +142,12 @@ export function createHandlers(
 	handlers.set('agent.send', (params, ctx) => handleAgentSend(params as RpcMethods['agent.send'], ctx));
 	handlers.set('agent.snapshot', (params, ctx) => handleAgentSnapshot(params as RpcMethods['agent.snapshot'], ctx));
 	handlers.set('agent.listCheckpoints', (_params, ctx) => handleListCheckpoints(ctx));
+	handlers.set('agent.pendingRequests', (params, ctx) =>
+		handleAgentPendingRequests(params as RpcMethods['agent.pendingRequests'], ctx),
+	);
+	handlers.set('agent.resolveSuspensions', (params, ctx) =>
+		handleAgentResolveSuspensions(params as RpcMethods['agent.resolveSuspensions'], ctx),
+	);
 
 	// Channel methods
 	handlers.set('channel.list', (_params, ctx) => handleChannelList(ctx));
@@ -463,6 +471,63 @@ async function handleListCheckpoints(context: RpcHandlerContext): Promise<RpcMet
 	return coordinator.listCheckpoints();
 }
 
+async function handleAgentPendingRequests(
+	params: RpcMethods['agent.pendingRequests'],
+	context: RpcHandlerContext,
+): Promise<RpcMethodResults['agent.pendingRequests']> {
+	const pendingRequests = await context.coordinator.getPendingRequests(params.sessionId);
+	return pendingRequests.map(toRpcPendingRequestInfo);
+}
+
+async function handleAgentResolveSuspensions(
+	params: RpcMethods['agent.resolveSuspensions'],
+	context: RpcHandlerContext,
+): Promise<RpcMethodResults['agent.resolveSuspensions']> {
+	const { coordinator, logger, modelFactory, toolRegistry } = context;
+	if (!Array.isArray(params.resolutions)) {
+		throw new Error('Invalid suspension resolutions: expected an array');
+	}
+	const resolutions = params.resolutions.map((resolution) => {
+		assertSuspensionResolution(resolution);
+		return resolution;
+	});
+
+	let adapter = coordinator.getAdapter(params.sessionId);
+	let modelIdentifier: string;
+
+	if (adapter) {
+		modelIdentifier = `${adapter.modelProvider}/${adapter.modelName}`;
+	} else {
+		if (!modelFactory) {
+			throw new Error('Model factory not configured - cannot restore a dormant suspension');
+		}
+
+		const checkpoint = await coordinator.loadCheckpoint(params.sessionId);
+		if (!checkpoint) {
+			throw new Error(`Checkpoint not found for session: ${params.sessionId}`);
+		}
+
+		const { provider, model, thinkingLevel } = checkpoint.adapterConfig;
+		modelIdentifier = `${provider}/${model}`;
+		adapter = await modelFactory.createAdapter(modelIdentifier, {
+			thinkingLevel: thinkingLevel as 'off' | 'minimal' | 'low' | 'medium' | 'high' | undefined,
+		});
+	}
+
+	logger.info(
+		{ sessionId: params.sessionId, model: modelIdentifier, resolutionCount: resolutions.length },
+		'Agent suspension resolution requested',
+	);
+
+	const handle = await coordinator.resolveSuspensions(params.sessionId, resolutions, adapter, {
+		tools: toolRegistry,
+	});
+
+	logger.info({ sessionId: handle.id, model: modelIdentifier }, 'Agent suspension resolution accepted');
+
+	return { id: handle.id };
+}
+
 // =============================================================================
 // Channel Handlers
 // =============================================================================
@@ -591,7 +656,7 @@ async function handleConversationUnbind(
 	const { conversationManager, logger } = context;
 
 	logger.info({ destination: params.destination }, 'Unbinding conversation');
-	conversationManager.unbind(params.destination);
+	await conversationManager.unbind(params.destination);
 
 	return { ok: true };
 }

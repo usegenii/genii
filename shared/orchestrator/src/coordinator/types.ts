@@ -4,7 +4,7 @@
 
 import type { AgentAdapter } from '../adapters/types';
 import type { ContextInjectorRegistry } from '../context-injectors/registry';
-import type { CoordinatorEvent } from '../events/types';
+import type { CoordinatorEvent, PendingRequestInfo, PendingResolution } from '../events/types';
 import type { AgentHandle } from '../handle/types';
 import type { AgentCheckpoint, SnapshotStore } from '../snapshot/types';
 import type { ToolRegistryInterface } from '../tools/types';
@@ -24,6 +24,12 @@ import type { Logger } from '../types/logger';
  */
 export interface ContinueConfig {
 	/** Tools available to the agent */
+	tools?: ToolRegistryInterface;
+}
+
+/** Configuration for restoring and resolving a suspended session. */
+export interface SuspensionRestoreConfig {
+	/** Tools available to replay the suspended invocation. */
 	tools?: ToolRegistryInterface;
 }
 
@@ -61,6 +67,41 @@ export interface Coordinator {
 		input: AgentInput,
 		adapter: AgentAdapter,
 		config?: ContinueConfig,
+	): Promise<AgentHandle>;
+
+	/**
+	 * Recover a committed tool batch and run its pending model continuation.
+	 * Returns at completion or at a new fully parked durable wait. This never
+	 * appends ordinary user input to the recovered turn.
+	 */
+	resumeContinuation(
+		sessionId: AgentSessionId,
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle>;
+
+	/**
+	 * Inspect pending requests without restoring a dormant model instance.
+	 */
+	getPendingRequests(sessionId: AgentSessionId): Promise<PendingRequestInfo[]>;
+
+	/**
+	 * Restore a suspended session without appending a user message.
+	 */
+	restoreSuspended(
+		sessionId: AgentSessionId,
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle>;
+
+	/**
+	 * Persist and replay typed resolutions through the same warm-or-cold path.
+	 */
+	resolveSuspensions(
+		sessionId: AgentSessionId,
+		resolutions: PendingResolution[],
+		adapter: AgentAdapter,
+		config?: SuspensionRestoreConfig,
 	): Promise<AgentHandle>;
 
 	/**

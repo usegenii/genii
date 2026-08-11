@@ -2,7 +2,7 @@
  * Tests for SnapshotStore implementations.
  */
 
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -185,12 +185,65 @@ describe('FileSnapshotStore', () => {
 			const loaded = await store.load('session-1' as AgentSessionId);
 			expect(loaded).toEqual(checkpoint);
 		});
+
+		it('should atomically replace the checkpoint without leaving temporary files', async () => {
+			const first = createMockCheckpoint('session-1');
+			const second = createMockCheckpoint('session-1');
+			second.session.metadata = { generation: 2 };
+
+			await store.save(first);
+			await store.save(second);
+
+			expect(await readdir(testDir)).toEqual(['session-1.json']);
+			expect(await store.load('session-1' as AgentSessionId)).toEqual(second);
+		});
+
+		it('should serialize concurrent saves for the same session in call order', async () => {
+			const first = createMockCheckpoint('session-1');
+			const second = createMockCheckpoint('session-1');
+			first.guidance.systemState = { payload: 'x'.repeat(8 * 1024 * 1024) };
+			second.guidance.systemState = { generation: 2 };
+
+			await Promise.all([store.save(first), store.save(second)]);
+
+			expect(await store.load('session-1' as AgentSessionId)).toEqual(second);
+			expect(await readdir(testDir)).toEqual(['session-1.json']);
+		});
+
+		it('should clean up a temporary file and remain usable when replacement fails', async () => {
+			const targetPath = join(testDir, 'session-1.json');
+			await mkdir(targetPath);
+
+			await expect(store.save(createMockCheckpoint('session-1'))).rejects.toThrow();
+			expect(await readdir(testDir)).toEqual(['session-1.json']);
+
+			await rm(targetPath, { recursive: true });
+			const checkpoint = createMockCheckpoint('session-1');
+			await store.save(checkpoint);
+			expect(await store.load('session-1' as AgentSessionId)).toEqual(checkpoint);
+		});
 	});
 
 	describe('load', () => {
 		it('should return null for non-existent session', async () => {
 			const result = await store.load('nonexistent' as AgentSessionId);
 			expect(result).toBeNull();
+		});
+
+		it('reads an unversioned legacy checkpoint', async () => {
+			const checkpoint = createMockCheckpoint('legacy-session');
+			await store.save(checkpoint);
+
+			await expect(store.load('legacy-session' as AgentSessionId)).resolves.toEqual(checkpoint);
+		});
+
+		it('rejects an unsupported checkpoint version', async () => {
+			const checkpoint = { ...createMockCheckpoint('future-session'), version: 999 };
+			await writeFile(join(testDir, 'future-session.json'), JSON.stringify(checkpoint), 'utf-8');
+
+			await expect(store.load('future-session' as AgentSessionId)).rejects.toThrow(
+				'Unsupported checkpoint version: 999',
+			);
 		});
 	});
 

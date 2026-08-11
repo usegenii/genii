@@ -170,7 +170,7 @@ export interface AgentSnapshot {
 export interface ShutdownOptions {
 	/** Wait for running agents to complete */
 	graceful?: boolean;
-	/** Timeout for graceful shutdown in milliseconds */
+	/** Timeout for graceful completion and shutdown persistence draining in milliseconds */
 	timeoutMs?: number;
 }
 

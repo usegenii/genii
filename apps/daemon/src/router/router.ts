@@ -16,6 +16,7 @@ import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { AgentEvent, CoordinatorEvent } from '@genii/orchestrator/events/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
+import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { AgentInput, AgentSessionId, AgentSpawnConfig } from '@genii/orchestrator/types/core';
 import type { CommandExecutorInterface } from '../commands/executor';
@@ -67,7 +68,10 @@ export interface AgentSpawnContext {
  * Returns a Promise since adapter creation may require async operations
  * like resolving secrets from a secret store.
  */
-export type AgentAdapterFactory = (agentId: AgentSessionId) => Promise<AgentAdapter>;
+export type AgentAdapterFactory = (agentId?: AgentSessionId, checkpoint?: AgentCheckpoint) => Promise<AgentAdapter>;
+
+const WAITING_RESPONSE =
+	'This conversation is waiting for a pending tool request. Resolve or cancel that request before sending another message.';
 
 /**
  * Configuration for the MessageRouter.
@@ -141,8 +145,12 @@ export class MessageRouter implements MessageRouterInterface {
 	/** Subscriptions to clean up on stop */
 	private readonly _subscriptions: Disposable[] = [];
 
+	/** Per-destination routing tails keep conversation mutations in source order. */
+	private readonly _destinationRoutes = new Map<string, Promise<void>>();
+
 	/** Whether the router is running */
 	private _running = false;
+	private _acceptingInbound = true;
 
 	constructor(config: MessageRouterConfig) {
 		this._logger = config.logger.child({ component: 'MessageRouter' });
@@ -168,6 +176,7 @@ export class MessageRouter implements MessageRouterInterface {
 		}
 
 		this._logger.info('Starting message router');
+		this._acceptingInbound = true;
 
 		// Subscribe to channel registry events
 		const channelUnsubscribe = this._channelRegistry.subscribe((event, channelId) => {
@@ -210,12 +219,14 @@ export class MessageRouter implements MessageRouterInterface {
 		}
 
 		this._logger.info('Stopping message router');
+		this._acceptingInbound = false;
 
 		// Unsubscribe from all subscriptions
 		for (const unsubscribe of this._subscriptions) {
 			unsubscribe();
 		}
 		this._subscriptions.length = 0;
+		await Promise.allSettled(this._destinationRoutes.values());
 
 		this._running = false;
 		this._logger.info('Message router stopped');
@@ -228,10 +239,27 @@ export class MessageRouter implements MessageRouterInterface {
 	 * @param channelId - The channel the event came from
 	 */
 	async handleInbound(event: InboundEvent, channelId: ChannelId): Promise<void> {
+		if (!this._acceptingInbound) {
+			throw new Error('Message router is not accepting inbound events');
+		}
 		this._logger.debug({ eventType: event.type, channelId }, 'Handling inbound event');
+		const routeKey = `${event.origin.channelId}\0${event.origin.ref}`;
+		const previousRoute = this._destinationRoutes.get(routeKey) ?? Promise.resolve();
+		const currentRoute = previousRoute.catch(() => undefined).then(() => this._handleInboundNow(event, channelId));
 
+		this._destinationRoutes.set(routeKey, currentRoute);
+		try {
+			await currentRoute;
+		} finally {
+			if (this._destinationRoutes.get(routeKey) === currentRoute) {
+				this._destinationRoutes.delete(routeKey);
+			}
+		}
+	}
+
+	private async _handleInboundNow(event: InboundEvent, channelId: ChannelId): Promise<void> {
 		// Update last active tracker if available (for pulse response routing)
-		if (this._lastActiveTracker && 'origin' in event && event.origin) {
+		if (this._lastActiveTracker) {
 			this._lastActiveTracker.update(event.origin);
 		}
 
@@ -391,7 +419,7 @@ export class MessageRouter implements MessageRouterInterface {
 		// If no agent is bound, spawn a new one with the initial input
 		if (binding.agentId === null) {
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
 				{ agentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned and bound new agent',
@@ -410,12 +438,18 @@ export class MessageRouter implements MessageRouterInterface {
 			return;
 		}
 
+		if (agentHandle.status === 'waiting' || agentHandle.getPendingRequests().length > 0) {
+			this._logger.info({ agentId }, 'Rejecting ordinary input while agent is waiting');
+			await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+			return;
+		}
+
 		// If agent is completed, continue from checkpoint to restore message history
 		if (agentHandle.status === 'completed') {
 			const adapter = this._coordinator.getAdapter(agentId);
 			if (adapter === undefined) {
 				this._logger.error({ agentId }, 'No adapter found for completed agent, cannot continue');
-				this._conversationManager.unbind(destination);
+				await this._conversationManager.unbind(destination);
 				return;
 			}
 
@@ -432,7 +466,7 @@ export class MessageRouter implements MessageRouterInterface {
 			} catch (error) {
 				this._logger.error({ error, agentId }, 'Error continuing conversation from checkpoint');
 				// Unbind on error so next message will spawn fresh agent
-				this._conversationManager.unbind(destination);
+				await this._conversationManager.unbind(destination);
 			}
 			return;
 		}
@@ -500,9 +534,9 @@ export class MessageRouter implements MessageRouterInterface {
 		if (checkpoint === null) {
 			this._logger.info({ agentId }, 'No checkpoint found for agent after restart, spawning new agent');
 			// No checkpoint - unbind and spawn a fresh agent
-			this._conversationManager.unbind(destination);
+			await this._conversationManager.unbind(destination);
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			this._logger.info(
 				{ newAgentId: handle.id, destination: `${destination.channelId}:${destination.ref}` },
 				'Spawned new agent to replace missing one',
@@ -511,9 +545,57 @@ export class MessageRouter implements MessageRouterInterface {
 			return;
 		}
 
+		const hasLegacyDurableBatch =
+			checkpoint.phase === undefined &&
+			checkpoint.toolExecutions.some((execution) => execution.suspendedStep !== undefined);
+		let requiresBatchRecovery = checkpoint.phase === 'continuation_pending';
+		if (!requiresBatchRecovery) {
+			const pendingRequests = await this._coordinator.getPendingRequests(agentId);
+			const waitingRequests = pendingRequests.filter((request) => request.status === 'waiting');
+			if (waitingRequests.length > 0) {
+				this._logger.info(
+					{ agentId, pendingCount: waitingRequests.length },
+					'Rejecting ordinary input for dormant waiting session',
+				);
+				await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+				return;
+			}
+			if (checkpoint.phase === 'batch_pending' || hasLegacyDurableBatch) {
+				// A suspended invocation may already have completed while an ordinary
+				// sibling was still running when the process stopped. It needs the same
+				// batch recovery path even though there is no resolution left to accept.
+				requiresBatchRecovery = true;
+			}
+		}
+
 		// Create a new adapter for the restored agent
+		let continuationRecovered = !requiresBatchRecovery;
 		try {
-			const adapter = await this._adapterFactory(agentId);
+			const adapter = await this._adapterFactory(agentId, checkpoint);
+			if (!continuationRecovered) {
+				const recoveredHandle = await this._coordinator.resumeContinuation(agentId, adapter, {
+					tools: this._toolRegistry,
+				});
+				continuationRecovered = true;
+				this._logger.info({ agentId }, 'Recovered pending model continuation after restart');
+				const recoveredPendingRequests = recoveredHandle.getPendingRequests();
+				if (recoveredHandle.status === 'waiting' || recoveredPendingRequests.length > 0) {
+					this._logger.info(
+						{ agentId, pendingCount: recoveredPendingRequests.length },
+						'Recovered continuation parked on a new suspension',
+					);
+					await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+					return;
+				}
+				if (recoveredHandle.status !== 'completed') {
+					this._logger.error(
+						{ agentId, status: recoveredHandle.status },
+						'Recovered continuation returned before a terminal or parked boundary',
+					);
+					await this._sendTextResponse(channelId, destination, WAITING_RESPONSE);
+					return;
+				}
+			}
 			const newHandle = await this._coordinator.continue(agentId, input, adapter, {
 				tools: this._toolRegistry,
 			});
@@ -523,11 +605,18 @@ export class MessageRouter implements MessageRouterInterface {
 			);
 			newHandle.start();
 		} catch (error) {
+			if (!continuationRecovered) {
+				this._logger.error(
+					{ error, agentId },
+					'Failed to recover pending model continuation; preserving conversation binding',
+				);
+				return;
+			}
 			this._logger.error({ error, agentId }, 'Failed to restore from checkpoint, spawning new agent');
 			// Failed to restore - unbind and spawn fresh
-			this._conversationManager.unbind(destination);
+			await this._conversationManager.unbind(destination);
 			const handle = await this._spawnAgent(channelId, input);
-			this._conversationManager.bind(destination, handle.id);
+			await this._conversationManager.bind(destination, handle.id);
 			handle.start();
 		}
 	}

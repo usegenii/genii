@@ -4,6 +4,7 @@ import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../logging/logger';
 import { ConversationManager } from '../manager';
+import type { ConversationStore } from '../store';
 import type { ConversationBinding } from '../types';
 
 /**
@@ -39,6 +40,16 @@ function createAgentId(id: string): AgentSessionId {
  */
 function createChannelId(id: string): ChannelId {
 	return id as ChannelId;
+}
+
+/**
+ * Create a minimal persistence store mock.
+ */
+function createMockStore(save: ConversationStore['save'] = vi.fn(async () => undefined)): ConversationStore {
+	return {
+		load: vi.fn(async () => []),
+		save,
+	};
 }
 
 describe('ConversationManager', () => {
@@ -137,6 +148,19 @@ describe('ConversationManager', () => {
 			// New agent should be mapped
 			expect(manager.getByAgent(createAgentId('agent-2'))).toBeDefined();
 		});
+
+		it('should persist the new binding before resolving', async () => {
+			const logger = createMockLogger();
+			const save = vi.fn(async (_bindings: ConversationBinding[]) => undefined);
+			const manager = new ConversationManager(logger, createMockStore(save));
+			const destination = createDestination('channel-1', 'user-123');
+			const agentId = createAgentId('agent-1');
+
+			await manager.bind(destination, agentId);
+
+			expect(save).toHaveBeenCalledOnce();
+			expect(save.mock.calls[0]?.[0]).toMatchObject([{ destination, agentId }]);
+		});
 	});
 
 	describe('unbind()', () => {
@@ -179,6 +203,80 @@ describe('ConversationManager', () => {
 
 			manager.getOrCreate(destination);
 			expect(() => manager.unbind(destination)).not.toThrow();
+		});
+
+		it('should persist the cleared binding before resolving', async () => {
+			const logger = createMockLogger();
+			const save = vi.fn(async (_bindings: ConversationBinding[]) => undefined);
+			const manager = new ConversationManager(logger, createMockStore(save));
+			const destination = createDestination('channel-1', 'user-123');
+
+			await manager.bind(destination, createAgentId('agent-1'));
+			save.mockClear();
+			await manager.unbind(destination);
+
+			expect(save).toHaveBeenCalledOnce();
+			expect(save.mock.calls[0]?.[0]).toMatchObject([{ destination, agentId: null }]);
+		});
+	});
+
+	describe('persistence ordering', () => {
+		it('should serialize concurrent mutations and preserve snapshot order', async () => {
+			const logger = createMockLogger();
+			let releaseFirstSave: (() => void) | undefined;
+			let firstSaveStarted: (() => void) | undefined;
+			const firstSaveGate = new Promise<void>((resolve) => {
+				releaseFirstSave = resolve;
+			});
+			const firstSaveSignal = new Promise<void>((resolve) => {
+				firstSaveStarted = resolve;
+			});
+			let activeSaves = 0;
+			let maximumActiveSaves = 0;
+			const snapshots: ConversationBinding[][] = [];
+			const save = vi.fn(async (bindings: ConversationBinding[]) => {
+				activeSaves += 1;
+				maximumActiveSaves = Math.max(maximumActiveSaves, activeSaves);
+				snapshots.push(bindings);
+				if (snapshots.length === 1) {
+					firstSaveStarted?.();
+					await firstSaveGate;
+				}
+				activeSaves -= 1;
+			});
+			const manager = new ConversationManager(logger, createMockStore(save));
+
+			const firstBind = manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1'));
+			await firstSaveSignal;
+			const secondBind = manager.bind(createDestination('channel-1', 'user-2'), createAgentId('agent-2'));
+			await Promise.resolve();
+
+			expect(save).toHaveBeenCalledOnce();
+			releaseFirstSave?.();
+			await Promise.all([firstBind, secondBind]);
+
+			expect(maximumActiveSaves).toBe(1);
+			expect(snapshots[0]).toHaveLength(1);
+			expect(snapshots[1]).toHaveLength(2);
+		});
+
+		it('should allow a later mutation to persist after a failed write', async () => {
+			const logger = createMockLogger();
+			const save = vi
+				.fn<ConversationStore['save']>()
+				.mockRejectedValueOnce(new Error('disk unavailable'))
+				.mockResolvedValueOnce(undefined);
+			const manager = new ConversationManager(logger, createMockStore(save));
+
+			await expect(
+				manager.bind(createDestination('channel-1', 'user-1'), createAgentId('agent-1')),
+			).rejects.toThrow('disk unavailable');
+			await expect(
+				manager.bind(createDestination('channel-1', 'user-2'), createAgentId('agent-2')),
+			).resolves.toBeUndefined();
+
+			expect(save).toHaveBeenCalledTimes(2);
+			expect(save.mock.calls[1]?.[0]).toHaveLength(2);
 		});
 	});
 

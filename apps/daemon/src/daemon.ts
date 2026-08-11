@@ -324,6 +324,7 @@ export class DaemonImpl implements Daemon {
 				await this._router.stop();
 			},
 			20,
+			{ waitOnHardTimeout: true },
 		);
 
 		// Priority 25: Save last active tracker state

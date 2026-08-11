@@ -10,9 +10,10 @@ import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
-import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { SuspensionId, ToolRegistryInterface } from '@genii/orchestrator/tools/types';
 import type { AgentSessionId } from '@genii/orchestrator/types/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CommandExecutorInterface } from '../../commands/executor';
 import type { ConversationManager } from '../../conversations/manager';
 import type { ConversationBinding } from '../../conversations/types';
 import type { Logger } from '../../logging/logger';
@@ -56,7 +57,10 @@ function createChannelId(id: string): ChannelId {
 /**
  * Create a mock agent handle for testing.
  */
-function createMockAgentHandle(id: AgentSessionId, status: 'running' | 'completed' = 'running'): AgentHandle {
+function createMockAgentHandle(
+	id: AgentSessionId,
+	status: 'running' | 'waiting' | 'completed' = 'running',
+): AgentHandle {
 	return {
 		id,
 		status,
@@ -95,18 +99,26 @@ function createMockAgentHandle(id: AgentSessionId, status: 'running' | 'complete
  */
 function createMockCoordinator(): Coordinator & {
 	continueMock: ReturnType<typeof vi.fn>;
+	resumeContinuationMock: ReturnType<typeof vi.fn>;
 	spawnMock: ReturnType<typeof vi.fn>;
 	loadCheckpointMock: ReturnType<typeof vi.fn>;
+	getPendingRequestsMock: ReturnType<typeof vi.fn>;
 } {
 	const continueMock = vi.fn();
+	const resumeContinuationMock = vi.fn();
 	const spawnMock = vi.fn();
 	const loadCheckpointMock = vi.fn();
+	const getPendingRequestsMock = vi.fn().mockResolvedValue([]);
 
 	return {
 		start: vi.fn().mockResolvedValue(undefined),
 		shutdown: vi.fn().mockResolvedValue(undefined),
 		spawn: spawnMock,
 		continue: continueMock,
+		resumeContinuation: resumeContinuationMock,
+		getPendingRequests: getPendingRequestsMock,
+		restoreSuspended: vi.fn(),
+		resolveSuspensions: vi.fn(),
 		get: vi.fn(),
 		getAdapter: vi.fn(),
 		list: vi.fn().mockReturnValue([]),
@@ -115,8 +127,10 @@ function createMockCoordinator(): Coordinator & {
 		subscribe: vi.fn().mockReturnValue(() => {}),
 		status: 'running',
 		continueMock,
+		resumeContinuationMock,
 		spawnMock,
 		loadCheckpointMock,
+		getPendingRequestsMock,
 	};
 }
 
@@ -251,6 +265,25 @@ function createMessageEvent(channelId: string, ref: string, text: string): Inbou
 	} as InboundEvent;
 }
 
+function createCommandEvent(channelId: string, ref: string, command: string): InboundEvent {
+	return {
+		type: 'command_received',
+		origin: {
+			channelId: channelId as ChannelId,
+			ref,
+			metadata: { conversationType: 'direct' },
+		},
+		author: {
+			id: 'user-123',
+			username: 'testuser',
+			isBot: false,
+		},
+		command,
+		args: '',
+		timestamp: Date.now(),
+	} as InboundEvent;
+}
+
 describe('MessageRouter', () => {
 	let mockLogger: Logger;
 	let mockCoordinator: ReturnType<typeof createMockCoordinator>;
@@ -282,6 +315,179 @@ describe('MessageRouter', () => {
 			...overrides,
 		});
 	}
+
+	describe('destination serialization', () => {
+		it('keeps a command mutation ahead of simultaneous ordinary input', async () => {
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const oldAgentId = createAgentId('old-agent');
+			const newAgentId = createAgentId('new-agent');
+			const oldHandle = createMockAgentHandle(oldAgentId, 'running');
+			const newHandle = createMockAgentHandle(newAgentId, 'running');
+			const binding: ConversationBinding = {
+				destination,
+				agentId: oldAgentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue(binding);
+			mockConversationManager.bind = vi.fn(async (_destination, agentId) => {
+				binding.agentId = agentId;
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(oldHandle);
+			mockCoordinator.spawnMock.mockResolvedValue(newHandle);
+
+			let markCommandStarted: () => void = () => undefined;
+			let releaseCommand: () => void = () => undefined;
+			const commandStarted = new Promise<void>((resolve) => {
+				markCommandStarted = resolve;
+			});
+			const commandGate = new Promise<void>((resolve) => {
+				releaseCommand = resolve;
+			});
+			const commandExecutor: CommandExecutorInterface = {
+				execute: vi.fn(async () => {
+					markCommandStarted();
+					await commandGate;
+					await oldHandle.terminate('start a new conversation');
+					binding.agentId = null;
+					return { type: 'silent' as const };
+				}),
+			};
+			const router = createRouter({ commandExecutor });
+
+			const command = router.handleInbound(createCommandEvent('test-channel', 'user-123', 'new'), channelId);
+			await commandStarted;
+			const message = router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'after new'),
+				channelId,
+			);
+			await Promise.resolve();
+
+			expect(mockCoordinator.spawnMock).not.toHaveBeenCalled();
+			expect(oldHandle.send).not.toHaveBeenCalled();
+
+			releaseCommand();
+			await Promise.all([command, message]);
+
+			expect(oldHandle.terminate).toHaveBeenCalledTimes(1);
+			expect(mockCoordinator.spawnMock).toHaveBeenCalledTimes(1);
+			expect(mockCoordinator.spawnMock).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ input: expect.objectContaining({ message: 'after new' }) }),
+			);
+			expect(vi.mocked(oldHandle.terminate).mock.invocationCallOrder[0]).toBeLessThan(
+				mockCoordinator.spawnMock.mock.invocationCallOrder[0] as number,
+			);
+			expect(oldHandle.send).not.toHaveBeenCalled();
+		});
+
+		it('drains accepted destination work and rejects new inbound work during stop', async () => {
+			const channelId = createChannelId('test-channel');
+			let markCommandStarted: () => void = () => undefined;
+			let releaseCommand: () => void = () => undefined;
+			const commandStarted = new Promise<void>((resolve) => {
+				markCommandStarted = resolve;
+			});
+			const commandGate = new Promise<void>((resolve) => {
+				releaseCommand = resolve;
+			});
+			const commandExecutor: CommandExecutorInterface = {
+				execute: vi.fn(async () => {
+					markCommandStarted();
+					await commandGate;
+					return { type: 'silent' as const };
+				}),
+			};
+			const router = createRouter({ commandExecutor });
+			await router.start();
+
+			const accepted = router.handleInbound(createCommandEvent('test-channel', 'user-123', 'new'), channelId);
+			await commandStarted;
+			let stopSettled = false;
+			const stop = router.stop().then(() => {
+				stopSettled = true;
+			});
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			expect(stopSettled).toBe(false);
+			await expect(
+				router.handleInbound(createMessageEvent('test-channel', 'user-123', 'too late'), channelId),
+			).rejects.toThrow('not accepting inbound events');
+
+			releaseCommand();
+			await accepted;
+			await stop;
+			expect(stopSettled).toBe(true);
+		});
+	});
+
+	describe('waiting sessions', () => {
+		it('rejects ordinary chat input for a live waiting agent', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const waitingHandle = createMockAgentHandle(agentId, 'waiting');
+			mockCoordinator.get = vi.fn().mockReturnValue(waitingHandle);
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+
+			await router.handleInbound(createMessageEvent('test-channel', 'user-123', 'hello?'), channelId);
+
+			expect(waitingHandle.send).not.toHaveBeenCalled();
+			expect(mockCoordinator.continueMock).not.toHaveBeenCalled();
+			expect(mockChannelRegistry.process).toHaveBeenCalledWith(
+				channelId,
+				expect.objectContaining({
+					content: expect.objectContaining({ text: expect.stringContaining('waiting') }),
+				}),
+			);
+		});
+
+		it('inspects a dormant checkpoint without restoring or replacing a waiting session', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const checkpoint: AgentCheckpoint = {
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 0, toolCalls: 0 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(undefined);
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			mockCoordinator.getPendingRequestsMock.mockResolvedValue([{ status: 'waiting' }]);
+
+			await router.handleInbound(createMessageEvent('test-channel', 'user-123', 'hello?'), channelId);
+
+			expect(mockCoordinator.getPendingRequestsMock).toHaveBeenCalledWith(agentId);
+			expect(mockAdapterFactory).not.toHaveBeenCalled();
+			expect(mockCoordinator.continueMock).not.toHaveBeenCalled();
+			expect(mockCoordinator.spawnMock).not.toHaveBeenCalled();
+			expect(mockConversationManager.unbind).not.toHaveBeenCalled();
+		});
+	});
 
 	describe('handleInbound with completed agent', () => {
 		it('should pass toolRegistry to coordinator.continue() when continuing a completed agent', async () => {
@@ -427,6 +633,7 @@ describe('MessageRouter', () => {
 
 			// Verify coordinator.continue was called with the toolRegistry
 			expect(mockCoordinator.continueMock).toHaveBeenCalledTimes(1);
+			expect(mockAdapterFactory).toHaveBeenCalledWith(agentId, checkpoint);
 			expect(mockCoordinator.continueMock).toHaveBeenCalledWith(
 				agentId,
 				expect.objectContaining({
@@ -437,6 +644,346 @@ describe('MessageRouter', () => {
 					tools: mockToolRegistry,
 				}),
 			);
+		});
+
+		it('recovers a continuation marker before forwarding the triggering input', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const checkpoint: AgentCheckpoint = {
+				phase: 'continuation_pending',
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 1, toolCalls: 1 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(undefined);
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			const adapter = createMockAdapter();
+			mockAdapterFactory.mockResolvedValue(adapter);
+			mockCoordinator.resumeContinuationMock.mockResolvedValue(createMockAgentHandle(agentId, 'completed'));
+			const continuedHandle = createMockAgentHandle(agentId, 'running');
+			mockCoordinator.continueMock.mockResolvedValue(continuedHandle);
+
+			await router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'Message after recovered continuation'),
+				channelId,
+			);
+
+			expect(mockCoordinator.getPendingRequestsMock).not.toHaveBeenCalled();
+			expect(mockCoordinator.resumeContinuationMock).toHaveBeenCalledWith(agentId, adapter, {
+				tools: mockToolRegistry,
+			});
+			expect(mockCoordinator.continueMock).toHaveBeenCalledWith(
+				agentId,
+				expect.objectContaining({ message: 'Message after recovered continuation' }),
+				adapter,
+				{ tools: mockToolRegistry },
+			);
+			expect(mockCoordinator.resumeContinuationMock.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCoordinator.continueMock.mock.invocationCallOrder[0] as number,
+			);
+			expect(continuedHandle.start).toHaveBeenCalledTimes(1);
+		});
+
+		it('recovers an accepted resolution with an unfinished ordinary sibling before either result', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const suspensionId = 'call-waiting:suspended-step' as SuspensionId;
+			const checkpoint: AgentCheckpoint = {
+				phase: 'batch_pending',
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 1, toolCalls: 2 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [
+					{
+						toolName: 'build',
+						toolCallId: 'call-waiting',
+						input: { value: 'resolved' },
+						completedSteps: [],
+						suspendedStep: {
+							suspensionId,
+							stepId: 'suspended-step',
+							request: { type: 'event', eventName: 'build.finished' },
+							suspendedAt: 100,
+							status: 'resolved',
+							resolution: { suspensionId, type: 'event', payload: 'accepted' },
+							resumeData: {
+								stepId: 'suspended-step',
+								outcome: { type: 'value', value: 'accepted' },
+							},
+						},
+					},
+					{
+						toolName: 'build',
+						toolCallId: 'call-sibling',
+						input: { value: 'unfinished' },
+						completedSteps: [],
+					},
+				],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(undefined);
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			mockCoordinator.getPendingRequestsMock.mockResolvedValue([
+				{
+					suspensionId,
+					toolCallId: 'call-waiting',
+					toolName: 'build',
+					stepId: 'suspended-step',
+					type: 'event',
+					request: { type: 'event', eventName: 'build.finished' },
+					suspendedAt: 100,
+					status: 'resolved',
+				},
+			]);
+			const adapter = createMockAdapter();
+			mockAdapterFactory.mockResolvedValue(adapter);
+			mockCoordinator.resumeContinuationMock.mockResolvedValue(createMockAgentHandle(agentId, 'completed'));
+			const continuedHandle = createMockAgentHandle(agentId, 'running');
+			mockCoordinator.continueMock.mockResolvedValue(continuedHandle);
+
+			await router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'Message after recovered sibling'),
+				channelId,
+			);
+
+			expect(mockCoordinator.getPendingRequestsMock).toHaveBeenCalledWith(agentId);
+			expect(mockCoordinator.resumeContinuationMock).toHaveBeenCalledWith(agentId, adapter, {
+				tools: mockToolRegistry,
+			});
+			expect(mockCoordinator.continueMock).toHaveBeenCalledWith(
+				agentId,
+				expect.objectContaining({ message: 'Message after recovered sibling' }),
+				adapter,
+				{ tools: mockToolRegistry },
+			);
+			expect(mockCoordinator.resumeContinuationMock.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCoordinator.continueMock.mock.invocationCallOrder[0] as number,
+			);
+		});
+
+		it('parks a re-suspended continuation without consuming input and lets router stop drain', async () => {
+			const router = createRouter();
+			await router.start();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const checkpoint: AgentCheckpoint = {
+				phase: 'continuation_pending',
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 1, toolCalls: 1 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(undefined);
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			const adapter = createMockAdapter();
+			mockAdapterFactory.mockResolvedValue(adapter);
+			const waitingHandle = createMockAgentHandle(agentId, 'waiting');
+			let markRecoveryStarted: (() => void) | undefined;
+			let releaseRecovery: (() => void) | undefined;
+			const recoveryStarted = new Promise<void>((resolve) => {
+				markRecoveryStarted = resolve;
+			});
+			const recoveryGate = new Promise<void>((resolve) => {
+				releaseRecovery = resolve;
+			});
+			mockCoordinator.resumeContinuationMock.mockImplementation(async () => {
+				markRecoveryStarted?.();
+				await recoveryGate;
+				return waitingHandle;
+			});
+
+			const inbound = router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'Do not append this while parked'),
+				channelId,
+			);
+			await recoveryStarted;
+			let stopSettled = false;
+			const stop = router.stop().then(() => {
+				stopSettled = true;
+			});
+			await Promise.resolve();
+			expect(stopSettled).toBe(false);
+
+			releaseRecovery?.();
+			await Promise.all([inbound, stop]);
+
+			expect(mockCoordinator.continueMock).not.toHaveBeenCalled();
+			expect(waitingHandle.send).not.toHaveBeenCalled();
+			expect(mockConversationManager.unbind).not.toHaveBeenCalled();
+			expect(mockChannelRegistry.process).toHaveBeenCalledWith(
+				channelId,
+				expect.objectContaining({
+					content: expect.objectContaining({ text: expect.stringContaining('waiting') }),
+				}),
+			);
+			expect(stopSettled).toBe(true);
+		});
+
+		it('serializes simultaneous inputs around continuation recovery', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const checkpoint: AgentCheckpoint = {
+				phase: 'continuation_pending',
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 1, toolCalls: 1 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			const adapter = createMockAdapter();
+			mockAdapterFactory.mockResolvedValue(adapter);
+
+			let releaseRecovery: () => void = () => undefined;
+			const recoveryGate = new Promise<void>((resolve) => {
+				releaseRecovery = resolve;
+			});
+			mockCoordinator.resumeContinuationMock.mockImplementation(async () => {
+				await recoveryGate;
+				return createMockAgentHandle(agentId, 'completed');
+			});
+
+			const continuedHandle = createMockAgentHandle(agentId, 'running');
+			let liveHandle: AgentHandle | undefined;
+			mockCoordinator.get = vi.fn(() => liveHandle);
+			mockCoordinator.continueMock.mockImplementation(async () => {
+				liveHandle = continuedHandle;
+				return continuedHandle;
+			});
+
+			const firstInput = router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'first after restart'),
+				channelId,
+			);
+			await vi.waitFor(() => expect(mockCoordinator.resumeContinuationMock).toHaveBeenCalledTimes(1));
+			const secondInput = router.handleInbound(
+				createMessageEvent('test-channel', 'user-123', 'second after restart'),
+				channelId,
+			);
+
+			await Promise.resolve();
+			expect(mockCoordinator.loadCheckpointMock).toHaveBeenCalledTimes(1);
+			expect(mockCoordinator.continueMock).not.toHaveBeenCalled();
+
+			releaseRecovery();
+			await Promise.all([firstInput, secondInput]);
+
+			expect(mockCoordinator.resumeContinuationMock).toHaveBeenCalledTimes(1);
+			expect(mockCoordinator.continueMock).toHaveBeenCalledTimes(1);
+			expect(mockCoordinator.continueMock).toHaveBeenCalledWith(
+				agentId,
+				expect.objectContaining({ message: 'first after restart' }),
+				adapter,
+				{ tools: mockToolRegistry },
+			);
+			expect(continuedHandle.send).toHaveBeenCalledTimes(1);
+			expect(continuedHandle.send).toHaveBeenCalledWith(
+				expect.objectContaining({ message: 'second after restart' }),
+			);
+		});
+
+		it('preserves the binding and does not consume input when marker recovery fails', async () => {
+			const router = createRouter();
+			const channelId = createChannelId('test-channel');
+			const destination = createDestination('test-channel', 'user-123');
+			const agentId = createAgentId('agent-1');
+			const checkpoint: AgentCheckpoint = {
+				phase: 'continuation_pending',
+				timestamp: Date.now(),
+				adapterName: 'mock-adapter',
+				session: {
+					id: agentId,
+					createdAt: Date.now(),
+					tags: [],
+					metadata: {},
+					metrics: { durationMs: 0, turns: 1, toolCalls: 1 },
+				},
+				guidance: { guidancePath: '/test/guidance', memoryWrites: [], systemState: {} },
+				messages: [],
+				adapterConfig: { provider: 'mock', model: 'mock-model' },
+				toolExecutions: [],
+			};
+			mockConversationManager.getOrCreate = vi.fn().mockReturnValue({
+				destination,
+				agentId,
+				createdAt: new Date(),
+				lastActivityAt: new Date(),
+			});
+			mockCoordinator.get = vi.fn().mockReturnValue(undefined);
+			mockCoordinator.loadCheckpointMock.mockResolvedValue(checkpoint);
+			mockCoordinator.resumeContinuationMock.mockRejectedValue(new Error('Continuation failed'));
+
+			await router.handleInbound(createMessageEvent('test-channel', 'user-123', 'Do not lose me'), channelId);
+
+			expect(mockCoordinator.continueMock).not.toHaveBeenCalled();
+			expect(mockCoordinator.spawnMock).not.toHaveBeenCalled();
+			expect(mockConversationManager.unbind).not.toHaveBeenCalled();
 		});
 
 		it('should spawn new agent when no checkpoint exists after restart', async () => {

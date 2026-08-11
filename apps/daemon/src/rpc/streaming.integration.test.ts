@@ -8,8 +8,13 @@ import { promisify } from 'node:util';
 import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
-import type { ContinueConfig, Coordinator } from '@genii/orchestrator/coordinator/types';
-import type { AgentEvent, CoordinatorEvent } from '@genii/orchestrator/events/types';
+import type { ContinueConfig, Coordinator, SuspensionRestoreConfig } from '@genii/orchestrator/coordinator/types';
+import type {
+	AgentEvent,
+	CoordinatorEvent,
+	PendingRequestInfo,
+	PendingResolution,
+} from '@genii/orchestrator/events/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
 import type {
@@ -164,6 +169,35 @@ class ManualCoordinator implements Coordinator {
 		_config?: ContinueConfig,
 	): Promise<AgentHandle> {
 		throw new Error('Continue is not used by streaming integration tests');
+	}
+
+	async resumeContinuation(
+		_sessionId: AgentSessionId,
+		_adapter: AgentAdapter,
+		_config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle> {
+		throw new Error('Continuation recovery is not used by streaming integration tests');
+	}
+
+	async getPendingRequests(_sessionId: AgentSessionId): Promise<PendingRequestInfo[]> {
+		return [];
+	}
+
+	async restoreSuspended(
+		_sessionId: AgentSessionId,
+		_adapter: AgentAdapter,
+		_config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle> {
+		throw new Error('Suspension restore is not used by streaming integration tests');
+	}
+
+	async resolveSuspensions(
+		_sessionId: AgentSessionId,
+		_resolutions: PendingResolution[],
+		_adapter: AgentAdapter,
+		_config?: SuspensionRestoreConfig,
+	): Promise<AgentHandle> {
+		throw new Error('Suspension resolution is not used by streaming integration tests');
 	}
 
 	get(id: AgentSessionId): AgentHandle | undefined {

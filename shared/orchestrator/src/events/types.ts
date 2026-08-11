@@ -2,23 +2,31 @@
  * Event types for the orchestrator system.
  */
 
-import type { ToolProgress } from '../tools/types';
+import type { SuspensionId, SuspensionResolution, ToolProgress } from '../tools/types';
 import type { AgentResult, AgentSessionId, AgentStatus } from '../types/core';
 
 /**
  * Information about a pending suspension request.
  */
 export interface PendingRequestInfo {
+	/** Stable ID for this exact suspension. */
+	suspensionId: SuspensionId;
 	/** Unique ID for this tool call */
 	toolCallId: string;
 	/** Name of the tool that is suspended */
 	toolName: string;
+	/** Exact durable step that suspended. */
+	stepId: string;
 	/** Type of suspension */
 	type: 'user_input' | 'approval' | 'event' | 'sleep';
 	/** Request details */
 	request: SuspensionRequestData;
 	/** When the suspension started */
 	suspendedAt: number;
+	/** Absolute deadline, when one was requested. */
+	deadline?: number | undefined;
+	/** Whether the request is waiting or has an accepted durable resolution. */
+	status: 'waiting' | 'resolved';
 }
 
 /**
@@ -53,21 +61,8 @@ export interface SleepRequestData {
 	wakeAt: number;
 }
 
-/**
- * Resolution for a pending request.
- */
-export interface PendingResolution {
-	/** Tool call ID to resolve */
-	toolCallId: string;
-	/** Result to return (for user_input or event) */
-	result?: unknown;
-	/** For approvals */
-	approved?: boolean;
-	/** Reason for approval/rejection */
-	reason?: string;
-	/** Whether to cancel the suspension */
-	cancel?: boolean;
-}
+/** Resolution for a pending request. */
+export type PendingResolution = SuspensionResolution;
 
 /**
  * Events emitted by an agent.
