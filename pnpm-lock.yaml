@@ -157,8 +157,8 @@ importers:
         specifier: 0.34.52
         version: 0.34.52
       smol-toml:
-        specifier: 1.6.0
-        version: 1.6.0
+        specifier: 1.7.1
+        version: 1.7.1
     devDependencies:
       '@types/node':
         specifier: 24.13.3
@@ -1978,8 +1978,8 @@ packages:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
 
-  smol-toml@1.6.0:
-    resolution: {integrity: sha512-4zemZi0HvTnYwLfrpk/CF9LOd9Lt87kAt50GnqhMpyF9U3poDAP2+iukq2bZsO/ufegbYehBkqINbsWxj4l4cw==}
+  smol-toml@1.7.1:
+    resolution: {integrity: sha512-PPlsspAZ4jbMBu5DMFhfUGDQLu/vrL4SyBROVS37x8ynnVmFIs1VPBz1Co8Xks3TvpIaZXmU85y4DrQ+UyVFoQ==}
     engines: {node: '>= 18'}
 
   socks-proxy-agent@8.0.5:
@@ -3882,7 +3882,7 @@ snapshots:
 
   smart-buffer@4.2.0: {}
 
-  smol-toml@1.6.0: {}
+  smol-toml@1.7.1: {}
 
   socks-proxy-agent@8.0.5:
     dependencies:
