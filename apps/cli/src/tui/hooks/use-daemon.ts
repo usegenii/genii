@@ -9,12 +9,7 @@ import { type DaemonStatus as ClientDaemonStatus, createClient, type DaemonClien
 /**
  * Daemon status information.
  */
-export interface DaemonStatus {
-	running: boolean;
-	version?: string;
-	uptime?: number;
-	pid?: number;
-}
+export type DaemonStatus = ClientDaemonStatus;
 
 /**
  * Options for the useDaemon hook.
@@ -67,12 +62,7 @@ export function useDaemon(options: UseDaemonOptions = {}): UseDaemonResult {
 
 			// Fetch full status
 			const daemonStatus: ClientDaemonStatus = await client.status();
-			setStatus({
-				running: true,
-				version: daemonStatus.version,
-				uptime: daemonStatus.uptime,
-				pid: daemonStatus.pid,
-			});
+			setStatus(daemonStatus);
 		} catch (err) {
 			setConnected(false);
 			setStatus(null);

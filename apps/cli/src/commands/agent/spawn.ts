@@ -99,9 +99,7 @@ export function spawnCommand(agent: Command): void {
 
 					const pairs: Array<[string, unknown]> = [
 						['ID', agentDetails.id],
-						['Name', agentDetails.name],
 						['Status', agentDetails.status],
-						['Model', agentDetails.model ?? 'default'],
 						['Created At', formatTimestamp(new Date(agentDetails.createdAt))],
 						['Duration', duration],
 					];

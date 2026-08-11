@@ -43,23 +43,8 @@ interface RpcError {
 // Domain Types
 // =============================================================================
 
-/**
- * Daemon status information.
- */
-export interface DaemonStatus {
-	version: string;
-	uptime: number;
-	pid: number;
-	agentCount: number;
-	channelCount: number;
-	conversationCount: number;
-	memoryUsage: {
-		heapUsed: number;
-		heapTotal: number;
-		external: number;
-		rss: number;
-	};
-}
+/** Daemon status information returned by the RPC boundary. */
+export type DaemonStatus = RpcMethodResults['daemon.status'];
 
 /**
  * Agent summary for listing.
@@ -73,32 +58,11 @@ export interface AgentSummary {
 	lastActiveAt: string;
 }
 
-/**
- * Agent details for show command.
- */
-export interface AgentDetails extends AgentSummary {
-	model: string;
-	systemPrompt?: string;
-	temperature?: number;
-	maxTokens?: number;
-	metadata: Record<string, unknown>;
-}
+/** Existing agent details returned by the RPC boundary. */
+export type AgentDetails = NonNullable<RpcMethodResults['agent.get']>;
 
-/**
- * Agent snapshot with full state.
- */
-export interface AgentSnapshot {
-	id: string;
-	name: string;
-	status: 'running' | 'paused' | 'terminated';
-	conversations: Array<{
-		ref: string;
-		channelId: string;
-		messageCount: number;
-	}>;
-	createdAt: string;
-	lastActiveAt: string;
-}
+/** Agent snapshot returned by the RPC boundary. */
+export type AgentSnapshot = RpcMethodResults['agent.snapshot'];
 
 /**
  * Filter for listing agents.
@@ -621,7 +585,11 @@ class SocketDaemonClient implements DaemonClient {
 	}
 
 	async getAgent(id: string): Promise<AgentDetails> {
-		return this._request('agent.get', { id });
+		const agent = await this._request<RpcMethodResults['agent.get']>('agent.get', { id });
+		if (agent === null) {
+			throw new Error(`Agent not found: ${id}`);
+		}
+		return agent;
 	}
 
 	async spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }> {

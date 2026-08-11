@@ -6,7 +6,7 @@
 import type { Command } from 'commander';
 import { createDaemonClient, type DaemonStatus } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
-import { formatUptime } from '../../utils/time';
+import { formatDuration } from '../../utils/time';
 
 interface StatusOptions {
 	watch?: boolean;
@@ -14,36 +14,15 @@ interface StatusOptions {
 }
 
 /**
- * Format bytes to human-readable string.
- */
-function formatBytes(bytes: number): string {
-	const units = ['B', 'KB', 'MB', 'GB'];
-	let unitIndex = 0;
-	let value = bytes;
-
-	while (value >= 1024 && unitIndex < units.length - 1) {
-		value /= 1024;
-		unitIndex++;
-	}
-
-	return `${value.toFixed(1)} ${units[unitIndex]}`;
-}
-
-/**
  * Display daemon status in human-readable format.
  */
 function displayStatus(status: DaemonStatus, formatter: ReturnType<typeof getFormatter>): void {
 	formatter.keyValue([
-		['Status', 'running'],
+		['Status', status.status],
 		['Version', status.version],
-		['PID', status.pid],
-		['Uptime', formatUptime(status.uptime)],
+		['Uptime', formatDuration(status.uptimeMs)],
 		['Agents', status.agentCount],
 		['Channels', status.channelCount],
-		['Conversations', status.conversationCount],
-		['Heap Used', formatBytes(status.memoryUsage.heapUsed)],
-		['Heap Total', formatBytes(status.memoryUsage.heapTotal)],
-		['RSS', formatBytes(status.memoryUsage.rss)],
 	]);
 }
 
