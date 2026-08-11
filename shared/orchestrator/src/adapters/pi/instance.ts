@@ -2,10 +2,10 @@
  * Pi agent instance implementation.
  */
 
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
-import { Agent } from '@mariozechner/pi-agent-core';
-import type { Api, Message, Model } from '@mariozechner/pi-ai';
-import { getModels, streamSimple } from '@mariozechner/pi-ai';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import { Agent } from '@earendil-works/pi-agent-core';
+import type { Api, Message, Model } from '@earendil-works/pi-ai';
+import { getModels, streamSimple } from '@earendil-works/pi-ai/compat';
 import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
 import type { AgentCheckpoint, InstanceCheckpoint, ToolExecutionState } from '../../snapshot/types';
 import { createToolRegistry } from '../../tools/registry';
@@ -597,24 +597,6 @@ const PROVIDER_TO_API: Record<string, Api> = {
 };
 
 /**
- * Genii-owned metadata for models outside Pi's generated catalog.
- */
-const MODEL_OVERRIDES: Record<string, Model<Api>> = {
-	'google/gemini-3.6-flash': {
-		id: 'gemini-3.6-flash',
-		name: 'Gemini 3.6 Flash',
-		api: 'google-generative-ai',
-		provider: 'google',
-		baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-		reasoning: true,
-		input: ['text', 'image'],
-		cost: { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1048576,
-		maxTokens: 65536,
-	},
-};
-
-/**
  * Create a custom model configuration for use with custom endpoints.
  */
 function createCustomModel(
@@ -694,20 +676,19 @@ function resolveModel(
 	thinkingLevel?: string,
 ): Model<Api> {
 	const models = getModels(providerType as 'anthropic' | 'openai' | 'google');
-	const foundModel =
-		models.find((model) => model.id === modelId || model.name === modelId) ??
-		MODEL_OVERRIDES[`${providerType}/${modelId}`];
+	const foundModel = models.find((model) => model.id === modelId || model.name === modelId);
 
-	if (providerType === 'google' && foundModel) {
+	if (baseUrl && foundModel) {
 		return {
 			...foundModel,
-			...(baseUrl ? { provider: `custom:${userProviderName}`, baseUrl } : {}),
+			provider: `custom:${userProviderName}`,
+			baseUrl,
 		} as Model<Api>;
 	}
 
 	if (baseUrl) {
 		// Custom endpoint - create a custom model configuration
-		const supportsReasoning = providerType === 'google' || (thinkingLevel !== undefined && thinkingLevel !== 'off');
+		const supportsReasoning = thinkingLevel !== undefined && thinkingLevel !== 'off';
 		return createCustomModel(modelId, providerType, userProviderName, baseUrl, supportsReasoning);
 	}
 

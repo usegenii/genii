@@ -2,7 +2,7 @@
  * Guidance integration for Pi adapter.
  */
 
-import type { AgentToolResult, AgentTool as PiAgentTool } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult, AgentTool as PiAgentTool } from '@earendil-works/pi-agent-core';
 import type { Static, TSchema } from '@sinclair/typebox';
 import type { GuidanceContext } from '../../guidance/types';
 import { formatSkillsForPrompt } from '../../skills/format';

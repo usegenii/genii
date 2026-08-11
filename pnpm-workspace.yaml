@@ -6,6 +6,3 @@ allowBuilds:
   esbuild: true
   "@google/genai@1.52.0": false
   "protobufjs@7.6.5": false
-
-patchedDependencies:
-  "@mariozechner/pi-ai@0.73.1": patches/@mariozechner__pi-ai@0.73.1.patch

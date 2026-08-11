@@ -1,4 +1,4 @@
-import type { Model } from '@mariozechner/pi-ai';
+import type { Model } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 import type { GuidanceContext } from '../../guidance/types';
 import type { AgentCheckpoint } from '../../snapshot/types';
@@ -59,7 +59,7 @@ describe('PiAgentAdapter', () => {
 		expect(requestPayload).toMatchObject({
 			model: 'gemini-3.6-flash',
 			config: {
-				maxOutputTokens: 32000,
+				maxOutputTokens: 65536,
 				thinkingConfig: { thinkingLevel: 'MINIMAL' },
 			},
 		});
@@ -93,7 +93,7 @@ describe('PiAgentAdapter', () => {
 			api: 'google-generative-ai',
 			provider: 'custom:google-proxy',
 			baseUrl: 'https://google.example.com/v1beta',
-			reasoning: true,
+			reasoning: false,
 			contextWindow: 200000,
 			maxTokens: 8192,
 		});
@@ -112,9 +112,9 @@ describe('PiAgentAdapter', () => {
 			model: 'experimental-gemini',
 			config: {
 				maxOutputTokens: 8192,
-				thinkingConfig: { thinkingBudget: 0 },
 			},
 		});
+		expect((requestPayload as { config: Record<string, unknown> }).config).not.toHaveProperty('thinkingConfig');
 	});
 
 	it('replays Gemini 3.6 tool calls with matching IDs and thought signatures', async () => {

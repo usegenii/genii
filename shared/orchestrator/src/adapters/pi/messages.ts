@@ -13,7 +13,7 @@ import type {
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-ai';
 import type { CheckpointContent, CheckpointMessage } from '../../snapshot/types';
 
 /**

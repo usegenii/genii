@@ -278,7 +278,7 @@ Gemini 3.6 Flash, it has the minimum-thinking semantics described in the Google 
 
 - [pnpm](https://pnpm.io/) - Package manager
 - [Turbo](https://turbo.build/) - Build system
-- [Node.js](https://nodejs.org/) - Runtime (v20+ recommended)
+- [Node.js](https://nodejs.org/) - Runtime (v22.19+)
 - [Rust](https://www.rust-lang.org/) - For Tauri desktop app (optional)
 
 ## Installation

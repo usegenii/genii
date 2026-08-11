@@ -31,7 +31,7 @@
 		},
 		{
 			"description": "Group pi-ai dependencies",
-			"matchPackageNames": ["@mariozechner/pi-ai", "@mariozechner/pi-agent-core"],
+			"matchPackageNames": ["@earendil-works/pi-ai", "@earendil-works/pi-agent-core"],
 			"groupName": "pi-ai"
 		}
 	]

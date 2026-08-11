@@ -34,10 +34,13 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"packageManager": "pnpm@11.20.0",
 	"dependencies": {
-		"@mariozechner/pi-agent-core": "0.73.1",
-		"@mariozechner/pi-ai": "0.73.1",
+		"@earendil-works/pi-agent-core": "0.84.1",
+		"@earendil-works/pi-ai": "0.84.1",
 		"@sinclair/typebox": "0.34.52",
 		"chrono-node": "2.10.1"
 	},
