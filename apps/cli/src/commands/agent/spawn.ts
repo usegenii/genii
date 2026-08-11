@@ -3,23 +3,40 @@
  * @module commands/agent/spawn
  */
 
+import type { RpcMethods } from '@genii/lib/rpc/methods';
 import type { Command } from 'commander';
-import { createDaemonClient, type SpawnAgentOptions } from '../../client';
+import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
 import { formatDuration, formatTimestamp } from '../../utils/time';
 
 /**
  * Parse bind option in format channel:ref.
  */
-function parseBindOption(bind: string | undefined): { channelId: string; ref: string } | undefined {
-	if (!bind) {
+type SpawnBind = NonNullable<RpcMethods['agent.spawn']['bind']>;
+
+interface SpawnCommandOptions {
+	task?: string;
+	bind?: string;
+	model?: string;
+}
+
+function parseBindOption(bind: string | undefined): SpawnBind | undefined {
+	if (bind === undefined) {
 		return undefined;
 	}
-	const parts = bind.split(':');
-	if (parts.length !== 2) {
+
+	const separatorIndex = bind.indexOf(':');
+	if (separatorIndex < 1 || separatorIndex === bind.length - 1) {
 		throw new Error('Invalid bind format. Expected channel:ref');
 	}
-	return { channelId: parts[0] ?? '', ref: parts[1] ?? '' };
+
+	const channelId = bind.slice(0, separatorIndex).trim();
+	const ref = bind.slice(separatorIndex + 1);
+	if (channelId.length === 0 || ref.trim().length === 0) {
+		throw new Error('Invalid bind format. Channel and ref must both be non-empty');
+	}
+
+	return { channelId: channelId as SpawnBind['channelId'], ref };
 }
 
 /**
@@ -31,56 +48,33 @@ export function spawnCommand(agent: Command): void {
 		.description('Spawn a new agent with an optional initial instruction')
 		.option('--task <id>', 'Task ID to start with')
 		.option('--bind <channel:ref>', 'Bind to a specific conversation (channel:ref format)')
-		.option('-n, --name <name>', 'Agent name')
 		.option('--model <model>', 'Model to use for the agent')
-		.option('--system-prompt <prompt>', 'System prompt for the agent')
-		.action(async (instruction: string | undefined, options) => {
+		.action(async (instruction: string | undefined, options: SpawnCommandOptions) => {
 			const globalOpts = agent.parent?.opts() ?? {};
 			const format = getOutputFormat(globalOpts);
 			const formatter = getFormatter(format);
 
+			let bindInfo: SpawnBind | undefined;
+			try {
+				bindInfo = parseBindOption(options.bind);
+			} catch (err) {
+				formatter.error(err instanceof Error ? err : new Error(String(err)));
+				process.exit(1);
+			}
+
+			const spawnRequest: RpcMethods['agent.spawn'] = {
+				...(options.model === undefined ? {} : { model: options.model }),
+				...(options.task === undefined ? {} : { task: options.task }),
+				...(bindInfo === undefined ? {} : { bind: bindInfo }),
+				...(instruction === undefined ? {} : { input: { message: instruction } }),
+			};
 			const client = createDaemonClient();
 
 			try {
 				await client.connect();
 
-				// Parse bind option
-				let bindInfo: { channelId: string; ref: string } | undefined;
-				try {
-					bindInfo = parseBindOption(options.bind);
-				} catch (err) {
-					formatter.error(err instanceof Error ? err : new Error(String(err)));
-					process.exit(1);
-				}
-
-				// Build spawn options
-				const spawnOptions: SpawnAgentOptions = {
-					name: options.name,
-					model: options.model,
-					systemPrompt: options.systemPrompt,
-					instruction,
-					metadata: {},
-				};
-
-				// Add task metadata if specified
-				if (options.task) {
-					spawnOptions.metadata = {
-						...spawnOptions.metadata,
-						taskId: options.task,
-					};
-				}
-
-				// Add bind metadata if specified
-				if (bindInfo) {
-					spawnOptions.metadata = {
-						...spawnOptions.metadata,
-						boundChannel: bindInfo.channelId,
-						boundRef: bindInfo.ref,
-					};
-				}
-
 				// Spawn the agent
-				const result = await client.spawnAgent(spawnOptions);
+				const result = await client.spawnAgent(spawnRequest);
 
 				// Output based on format
 				if (format === 'json') {

@@ -251,8 +251,18 @@ async function handleDaemonReload(context: RpcHandlerContext): Promise<RpcMethod
 // =============================================================================
 
 async function handleAgentList(params: RpcMethods['agent.list'], context: RpcHandlerContext): Promise<AgentSummary[]> {
-	const { coordinator } = context;
-	const handles = coordinator.list(params.filter);
+	const { coordinator, conversationManager } = context;
+	const { channelId, ...coordinatorFilter } = params.filter ?? {};
+	let handles = coordinator.list(params.filter === undefined ? undefined : coordinatorFilter);
+
+	if (channelId !== undefined) {
+		const boundAgentIds = new Set(
+			conversationManager
+				.list({ channelId })
+				.flatMap((binding) => (binding.agentId === null ? [] : [binding.agentId])),
+		);
+		handles = handles.filter((handle) => boundAgentIds.has(handle.id));
+	}
 
 	return handles.map((handle) => ({
 		id: handle.id,
@@ -288,7 +298,7 @@ async function handleAgentSpawn(
 	params: RpcMethods['agent.spawn'],
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['agent.spawn']> {
-	const { coordinator, modelFactory, appConfig, toolRegistry, logger } = context;
+	const { coordinator, conversationManager, modelFactory, appConfig, toolRegistry, logger } = context;
 
 	if (!modelFactory) {
 		throw new Error('Model factory not configured - cannot spawn agents');
@@ -320,6 +330,9 @@ async function handleAgentSpawn(
 		tags: params.tags,
 		tools: toolRegistry,
 	});
+	if (params.bind) {
+		conversationManager.bind(params.bind, handle.id);
+	}
 	handle.start();
 
 	logger.info({ agentId: handle.id, model }, 'Agent spawned');
