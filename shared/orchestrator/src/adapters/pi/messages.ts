@@ -13,7 +13,7 @@ import type {
 	ToolCall,
 	ToolResultMessage,
 	UserMessage,
-} from '@mariozechner/pi-ai';
+} from '@earendil-works/pi-ai';
 import type { CheckpointContent, CheckpointMessage } from '../../snapshot/types';
 
 /**
@@ -68,10 +68,18 @@ function userMessageToCheckpoint(msg: UserMessage): CheckpointMessage {
 function assistantMessageToCheckpoint(msg: AssistantMessage): CheckpointMessage {
 	const content: CheckpointContent[] = msg.content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text', text: c.text };
+			return {
+				type: 'text',
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'thinking') {
-			return { type: 'thinking', text: c.thinking };
+			return {
+				type: 'thinking',
+				text: c.thinking,
+				...(c.thinkingSignature !== undefined ? { thinkingSignature: c.thinkingSignature } : {}),
+			};
 		}
 		if (c.type === 'toolCall') {
 			return {
@@ -79,6 +87,7 @@ function assistantMessageToCheckpoint(msg: AssistantMessage): CheckpointMessage 
 				id: c.id,
 				name: c.name,
 				input: c.arguments,
+				...(c.thoughtSignature !== undefined ? { thoughtSignature: c.thoughtSignature } : {}),
 			};
 		}
 		throw new Error(`Unknown assistant content type: ${(c as { type: string }).type}`);
@@ -88,6 +97,7 @@ function assistantMessageToCheckpoint(msg: AssistantMessage): CheckpointMessage 
 		role: 'assistant',
 		content,
 		timestamp: msg.timestamp,
+		api: msg.api,
 		provider: msg.provider,
 		model: msg.model,
 	};
@@ -96,7 +106,11 @@ function assistantMessageToCheckpoint(msg: AssistantMessage): CheckpointMessage 
 function toolResultMessageToCheckpoint(msg: ToolResultMessage): CheckpointMessage {
 	const content: CheckpointContent[] = msg.content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text', text: c.text };
+			return {
+				type: 'text',
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'image') {
 			return { type: 'image', mediaType: c.mimeType, data: c.data };
@@ -121,7 +135,11 @@ function normalizeUserContent(content: string | (TextContent | ImageContent)[]):
 
 	return content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text', text: c.text };
+			return {
+				type: 'text',
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'image') {
 			return { type: 'image', mediaType: c.mimeType, data: c.data };
@@ -137,7 +155,11 @@ function normalizeUserContent(content: string | (TextContent | ImageContent)[]):
 function checkpointToUserMessage(msg: CheckpointMessage): UserMessage {
 	const content = msg.content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text' as const, text: c.text };
+			return {
+				type: 'text' as const,
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'image') {
 			return { type: 'image' as const, mimeType: c.mediaType, data: c.data };
@@ -155,10 +177,18 @@ function checkpointToUserMessage(msg: CheckpointMessage): UserMessage {
 function checkpointToAssistantMessage(msg: CheckpointMessage): AssistantMessage {
 	const content: (TextContent | ThinkingContent | ToolCall)[] = msg.content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text' as const, text: c.text };
+			return {
+				type: 'text' as const,
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'thinking') {
-			return { type: 'thinking' as const, thinking: c.text };
+			return {
+				type: 'thinking' as const,
+				thinking: c.text,
+				...(c.thinkingSignature !== undefined ? { thinkingSignature: c.thinkingSignature } : {}),
+			};
 		}
 		if (c.type === 'tool_use') {
 			return {
@@ -166,6 +196,7 @@ function checkpointToAssistantMessage(msg: CheckpointMessage): AssistantMessage 
 				id: c.id,
 				name: c.name,
 				arguments: c.input as Record<string, unknown>,
+				...(c.thoughtSignature !== undefined ? { thoughtSignature: c.thoughtSignature } : {}),
 			};
 		}
 		throw new Error(`Invalid content type for assistant message: ${c.type}`);
@@ -176,7 +207,7 @@ function checkpointToAssistantMessage(msg: CheckpointMessage): AssistantMessage 
 		content,
 		timestamp: msg.timestamp,
 		// Restore provider metadata with defaults
-		api: 'anthropic-messages',
+		api: (msg.api ?? 'anthropic-messages') as AssistantMessage['api'],
 		provider: msg.provider ?? 'unknown',
 		model: msg.model ?? 'unknown',
 		usage: {
@@ -194,7 +225,11 @@ function checkpointToAssistantMessage(msg: CheckpointMessage): AssistantMessage 
 function checkpointToToolResultMessage(msg: CheckpointMessage): ToolResultMessage {
 	const content: (TextContent | ImageContent)[] = msg.content.map((c) => {
 		if (c.type === 'text') {
-			return { type: 'text' as const, text: c.text };
+			return {
+				type: 'text' as const,
+				text: c.text,
+				...(c.textSignature !== undefined ? { textSignature: c.textSignature } : {}),
+			};
 		}
 		if (c.type === 'image') {
 			return { type: 'image' as const, mimeType: c.mediaType, data: c.data };

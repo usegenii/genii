@@ -42,12 +42,20 @@ export interface OnboardConfig {
 }
 
 /**
+ * Configuration for inspecting onboarding status.
+ */
+export interface OnboardStatusConfig extends OnboardConfig {
+	/** Base path where configuration and secrets are stored */
+	dataPath: string;
+}
+
+/**
  * Get the status of the onboarding operation.
  *
  * Returns information about what files would be copied and which already exist.
  */
-export async function getOnboardStatus(config: OnboardConfig): Promise<OnboardStatus> {
-	const { guidancePath, logger } = config;
+export async function getOnboardStatus(config: OnboardStatusConfig): Promise<OnboardStatus> {
+	const { dataPath, guidancePath, logger } = config;
 
 	logger.debug({ guidancePath }, 'Checking onboard status');
 
@@ -62,6 +70,7 @@ export async function getOnboardStatus(config: OnboardConfig): Promise<OnboardSt
 	}
 
 	return {
+		dataPath,
 		guidancePath,
 		templates: [...TEMPLATE_FILES],
 		existing,

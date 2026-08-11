@@ -714,6 +714,7 @@ async function handleOnboardStatus(context: RpcHandlerContext): Promise<OnboardS
 	const { config, logger } = context;
 
 	return getOnboardStatus({
+		dataPath: config.storagePath,
 		guidancePath: config.guidancePath,
 		logger,
 	});

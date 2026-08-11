@@ -5,11 +5,12 @@
 import type { Config } from '@genii/config/config';
 import type { SecretStore } from '@genii/config/secrets/types';
 import type { ThinkingLevel } from '@genii/config/types/model';
+import type { ProviderApiType } from '@genii/config/types/provider';
 
 /**
  * Supported provider types.
  */
-export type ProviderType = 'anthropic' | 'openai' | 'google';
+export type ProviderType = ProviderApiType;
 
 /**
  * Model identifier in the format "provider/model-name".

@@ -183,6 +183,8 @@ export interface ConversationDetails extends ConversationSummary {
  * Status of the onboard operation.
  */
 export interface OnboardStatus {
+	/** Base path where configuration and secrets are stored */
+	dataPath: string;
 	/** Path where guidance files will be copied */
 	guidancePath: string;
 	/** List of template files available to copy */
@@ -213,6 +215,25 @@ export interface OnboardExecuteOptions {
 	skip: boolean;
 	/** Only report what would be done, don't actually copy */
 	dryRun: boolean;
+}
+
+const INCOMPATIBLE_ONBOARD_STATUS_MESSAGE =
+	'The running Genii daemon returned an incompatible onboarding status without a data path. Upgrade Genii if needed, restart the daemon, then run onboarding again.';
+
+/**
+ * Validate the daemon response before onboarding uses its filesystem path.
+ */
+function validateOnboardStatus(status: unknown): OnboardStatus {
+	if (typeof status !== 'object' || status === null) {
+		throw new Error(INCOMPATIBLE_ONBOARD_STATUS_MESSAGE);
+	}
+
+	const dataPath = Reflect.get(status, 'dataPath');
+	if (typeof dataPath !== 'string' || dataPath.trim().length === 0) {
+		throw new Error(INCOMPATIBLE_ONBOARD_STATUS_MESSAGE);
+	}
+
+	return status as OnboardStatus;
 }
 
 // =============================================================================
@@ -725,7 +746,8 @@ class SocketDaemonClient implements DaemonClient {
 	// =========================================================================
 
 	async onboardStatus(): Promise<OnboardStatus> {
-		return this._request('onboard.status');
+		const status = await this._request<unknown>('onboard.status');
+		return validateOnboardStatus(status);
 	}
 
 	async onboardExecute(options: OnboardExecuteOptions): Promise<OnboardResult> {

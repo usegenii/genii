@@ -18,12 +18,11 @@
 
 import { parseArgs } from 'node:util';
 import { loadConfig } from '@genii/config/config';
-import { getDefaultBasePath } from '@genii/config/paths';
 import { createSecretStore } from '@genii/config/secrets/composite';
 import { createModelFactory } from '@genii/models/factory';
 import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
-import { type CreateDaemonOptions, createDaemon, resolveDaemonLogLevel } from './factory';
+import { type CreateDaemonOptions, createDaemon, resolveDaemonDataPath, resolveDaemonLogLevel } from './factory';
 import { createLogBuffer } from './logging/buffer';
 import { createLogger, type LogLevel } from './logging/logger';
 
@@ -264,7 +263,7 @@ export async function main(): Promise<void> {
 	}
 
 	// Determine data path (use default if not specified)
-	const dataPath = args.dataPath ?? getDefaultBasePath();
+	const dataPath = resolveDaemonDataPath(args.dataPath);
 
 	const config = await loadConfig({ basePath: dataPath });
 	const logLevel = resolveDaemonLogLevel({ logLevel: args.logLevel, config });

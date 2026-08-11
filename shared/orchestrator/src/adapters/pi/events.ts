@@ -2,7 +2,7 @@
  * Pi event mapping.
  */
 
-import type { AgentEvent as PiAgentEvent } from '@mariozechner/pi-agent-core';
+import type { AgentEvent as PiAgentEvent } from '@earendil-works/pi-agent-core';
 import type { AgentEvent } from '../../events/types';
 
 /**

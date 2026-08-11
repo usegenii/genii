@@ -185,8 +185,7 @@ export function OnboardingWizard(props: OnboardingWizardProps): React.ReactEleme
 	useEffect(() => {
 		async function loadInitialState() {
 			// Load existing config from config files
-			const configPath = props.configPath.replace(/\/guidance$/, '');
-			const existingConfig = await loadExistingConfig(configPath);
+			const existingConfig = await loadExistingConfig(props.configPath);
 
 			// Determine starting page based on existing config
 			const startingPage = getStartingPage(existingConfig);

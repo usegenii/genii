@@ -23,8 +23,7 @@ const API_KEY_FIELD: SetupField = {
 };
 
 /**
- * Built-in provider definitions.
- * MVP: Z.ai Coding Plan (OpenAI API compatible)
+ * Built-in provider definitions available during onboarding.
  */
 export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
 	{
@@ -37,6 +36,20 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
 				type: 'api-key',
 				name: 'API Key',
 				description: 'Enter your Z.ai API key',
+				fields: [API_KEY_FIELD],
+			},
+		],
+	},
+	{
+		id: 'google',
+		name: 'Google Generative AI',
+		apiType: 'google',
+		defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+		authMethods: [
+			{
+				type: 'api-key',
+				name: 'API Key',
+				description: 'Enter your Google Generative AI API key',
 				fields: [API_KEY_FIELD],
 			},
 		],
@@ -60,6 +73,7 @@ export const CUSTOM_PROVIDER_DEFINITION: ProviderDefinition = {
 			options: [
 				{ value: 'anthropic', label: 'Anthropic API' },
 				{ value: 'openai', label: 'OpenAI-compatible API' },
+				{ value: 'google', label: 'Google Generative AI API' },
 			],
 		},
 		{
@@ -98,6 +112,13 @@ export const BUILTIN_MODELS: ModelDefinition[] = [
 		provider: 'zai',
 		contextWindow: 128000,
 		maxOutputTokens: 4096,
+	},
+	{
+		id: 'gemini-3.6-flash',
+		name: 'Gemini 3.6 Flash',
+		provider: 'google',
+		contextWindow: 1048576,
+		maxOutputTokens: 65536,
 	},
 ];
 

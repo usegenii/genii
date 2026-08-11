@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { ProviderConfig } from '../types/provider.js';
+import { isProviderApiType, PROVIDER_API_TYPES, type ProviderConfig } from '../types/provider.js';
 import { readTomlTableMapOptional } from './toml.js';
 
 /**
@@ -21,5 +21,15 @@ import { readTomlTableMapOptional } from './toml.js';
 export async function loadProvidersConfig(basePath: string): Promise<Record<string, ProviderConfig>> {
 	const filePath = path.join(basePath, 'providers.toml');
 	const config = await readTomlTableMapOptional<ProviderConfig>(filePath);
-	return config ?? {};
+	if (!config) return {};
+
+	for (const [providerId, provider] of Object.entries(config)) {
+		if (!isProviderApiType(provider.type)) {
+			throw new Error(
+				`Provider "${providerId}" has unsupported API type "${String(provider.type)}". Supported types: ${PROVIDER_API_TYPES.join(', ')}`,
+			);
+		}
+	}
+
+	return config;
 }

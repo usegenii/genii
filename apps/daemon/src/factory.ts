@@ -7,7 +7,7 @@
  * - Dependency injection setup
  */
 
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { Config } from '@genii/config/config';
 import { getDefaultBasePath } from '@genii/config/paths';
@@ -90,6 +90,13 @@ export interface CreateDaemonOptions {
 export function resolveDaemonLogLevel(options: Pick<CreateDaemonOptions, 'logLevel' | 'config'>): LogLevel {
 	const configLogLevel = options.config?.getPreferences()?.logging?.level;
 	return options.logLevel ?? configLogLevel ?? 'info';
+}
+
+/**
+ * Resolve the daemon-owned data directory before it is used or exposed over RPC.
+ */
+export function resolveDaemonDataPath(dataPath?: string): string {
+	return resolve(dataPath ?? getDefaultBasePath());
 }
 
 /**
@@ -225,7 +232,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 export async function createDaemon(options: CreateDaemonOptions = {}): Promise<Daemon> {
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
-	const dataPath = options.dataPath ?? getDefaultBasePath();
+	const dataPath = resolveDaemonDataPath(options.dataPath);
 	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {
@@ -446,7 +453,7 @@ export interface CreateDaemonWithDepsOptions extends CreateDaemonOptions {
 export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions = {}): Promise<Daemon> {
 	// Resolve configuration
 	const socketPath = options.socketPath ?? getDefaultSocketPath();
-	const dataPath = options.dataPath ?? getDefaultBasePath();
+	const dataPath = resolveDaemonDataPath(options.dataPath);
 	const logLevel = resolveDaemonLogLevel(options);
 
 	const config: DaemonConfig = {

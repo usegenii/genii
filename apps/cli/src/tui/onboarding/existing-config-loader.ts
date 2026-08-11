@@ -10,6 +10,7 @@ import { loadModelsConfig } from '@genii/config/loaders/models';
 import { loadProvidersConfig } from '@genii/config/loaders/providers';
 import { BUILTIN_PROVIDERS } from '@genii/config/providers/definitions';
 import { createSecretStore } from '@genii/config/secrets/composite';
+import type { ProviderConfig } from '@genii/config/types/provider';
 import type { ExistingChannelInfo, ExistingConfig, ExistingModelInfo, ExistingProviderInfo } from './types';
 
 /**
@@ -24,14 +25,23 @@ function getSecretName(credential: string): string | undefined {
 }
 
 /**
+ * Check whether a stored provider matches a built-in provider contract.
+ * Provider IDs are user-defined, so an ID match alone is not sufficient.
+ */
+export function isBuiltinProviderConfig(providerId: string, config: ProviderConfig): boolean {
+	const definition = BUILTIN_PROVIDERS.find((provider) => provider.id === providerId);
+	return (
+		definition !== undefined && config.type === definition.apiType && config.baseUrl === definition.defaultBaseUrl
+	);
+}
+
+/**
  * Load existing configuration from config files.
  *
  * @param configPath - Base path for config files
  * @returns Existing configuration with providers and models
  */
 export async function loadExistingConfig(configPath: string): Promise<ExistingConfig> {
-	const builtinIds = new Set(BUILTIN_PROVIDERS.map((p) => p.id));
-
 	// Load provider and model configs
 	const providersConfig = await loadProvidersConfig(configPath);
 	const modelsConfig = await loadModelsConfig(configPath);
@@ -43,7 +53,9 @@ export async function loadExistingConfig(configPath: string): Promise<ExistingCo
 	const providers: ExistingProviderInfo[] = [];
 	for (const [providerId, config] of Object.entries(providersConfig)) {
 		const secretName = getSecretName(config.credential);
-		let hasStoredApiKey = false;
+		// Direct credentials can be retained as-is without copying their value into
+		// the editable provider state or API-key field.
+		let hasStoredApiKey = secretName === undefined && config.credential.length > 0;
 
 		if (secretName) {
 			const result = await secretStore.get(secretName);
@@ -53,7 +65,7 @@ export async function loadExistingConfig(configPath: string): Promise<ExistingCo
 		providers.push({
 			providerId,
 			config,
-			isBuiltin: builtinIds.has(providerId),
+			isBuiltin: isBuiltinProviderConfig(providerId, config),
 			hasStoredApiKey,
 		});
 	}

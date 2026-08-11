@@ -2,10 +2,10 @@
  * Pi agent instance implementation.
  */
 
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
-import { Agent } from '@mariozechner/pi-agent-core';
-import type { Api, Message, Model } from '@mariozechner/pi-ai';
-import { getModels, streamSimple } from '@mariozechner/pi-ai';
+import type { AgentMessage } from '@earendil-works/pi-agent-core';
+import { Agent } from '@earendil-works/pi-agent-core';
+import type { Api, Message, Model } from '@earendil-works/pi-ai';
+import { getModels, streamSimple } from '@earendil-works/pi-ai/compat';
 import type { AgentEvent, PendingRequestInfo, PendingResolution, SuspensionRequestData } from '../../events/types';
 import type { AgentCheckpoint, InstanceCheckpoint, ToolExecutionState } from '../../snapshot/types';
 import { createToolRegistry } from '../../tools/registry';
@@ -114,7 +114,7 @@ export class PiAgentInstance implements AgentInstance {
 	private inputQueue: AgentInput[] = [];
 	private createdAt = Date.now();
 	private apiKeyGetter?: () => Promise<string | undefined>;
-	private thinkingLevel: 'minimal' | 'low' | 'medium' | 'high' = 'low';
+	private thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' = 'low';
 	private logger: Logger;
 
 	constructor(
@@ -147,7 +147,7 @@ export class PiAgentInstance implements AgentInstance {
 			this.apiKeyGetter = async () => key;
 		}
 
-		if (options.thinkingLevel && options.thinkingLevel !== 'off') {
+		if (options.thinkingLevel !== undefined) {
 			this.thinkingLevel = options.thinkingLevel;
 		}
 
@@ -675,6 +675,17 @@ function resolveModel(
 	baseUrl?: string,
 	thinkingLevel?: string,
 ): Model<Api> {
+	const models = getModels(providerType as 'anthropic' | 'openai' | 'google');
+	const foundModel = models.find((model) => model.id === modelId || model.name === modelId);
+
+	if (baseUrl && foundModel) {
+		return {
+			...foundModel,
+			provider: `custom:${userProviderName}`,
+			baseUrl,
+		} as Model<Api>;
+	}
+
 	if (baseUrl) {
 		// Custom endpoint - create a custom model configuration
 		const supportsReasoning = thinkingLevel !== undefined && thinkingLevel !== 'off';
@@ -682,9 +693,6 @@ function resolveModel(
 	}
 
 	// Standard provider - look up from known models
-	const models = getModels(providerType as 'anthropic' | 'openai' | 'google');
-	const foundModel = models.find((m) => m.id === modelId || m.name === modelId);
-
 	if (!foundModel) {
 		throw new Error(`Model "${modelId}" not found for provider "${providerType}"`);
 	}
