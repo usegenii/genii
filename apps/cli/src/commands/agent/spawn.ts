@@ -17,9 +17,7 @@ type SpawnBind = NonNullable<RpcMethods['agent.spawn']['bind']>;
 interface SpawnCommandOptions {
 	task?: string;
 	bind?: string;
-	name?: string;
 	model?: string;
-	systemPrompt?: string;
 }
 
 function parseBindOption(bind: string | undefined): SpawnBind | undefined {
@@ -41,21 +39,6 @@ function parseBindOption(bind: string | undefined): SpawnBind | undefined {
 	return { channelId: channelId as SpawnBind['channelId'], ref };
 }
 
-function validateSpawnOptions(options: SpawnCommandOptions): void {
-	if (options.name !== undefined) {
-		throw new Error('--name is not supported by the daemon agent.spawn contract');
-	}
-	if (options.systemPrompt !== undefined) {
-		throw new Error('--system-prompt is not supported; configure agent guidance instead');
-	}
-	if (options.task !== undefined && options.task.trim().length === 0) {
-		throw new Error('--task requires a non-empty task ID');
-	}
-	if (options.model !== undefined && options.model.trim().length === 0) {
-		throw new Error('--model requires a non-empty model identifier');
-	}
-}
-
 /**
  * Spawn a new agent.
  */
@@ -65,9 +48,7 @@ export function spawnCommand(agent: Command): void {
 		.description('Spawn a new agent with an optional initial instruction')
 		.option('--task <id>', 'Task ID to start with')
 		.option('--bind <channel:ref>', 'Bind to a specific conversation (channel:ref format)')
-		.option('-n, --name <name>', 'Unsupported: daemon agents do not have names')
 		.option('--model <model>', 'Model to use for the agent')
-		.option('--system-prompt <prompt>', 'Unsupported: configure agent guidance instead')
 		.action(async (instruction: string | undefined, options: SpawnCommandOptions) => {
 			const globalOpts = agent.parent?.opts() ?? {};
 			const format = getOutputFormat(globalOpts);
@@ -75,7 +56,6 @@ export function spawnCommand(agent: Command): void {
 
 			let bindInfo: SpawnBind | undefined;
 			try {
-				validateSpawnOptions(options);
 				bindInfo = parseBindOption(options.bind);
 			} catch (err) {
 				formatter.error(err instanceof Error ? err : new Error(String(err)));

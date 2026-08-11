@@ -357,12 +357,21 @@ describe('agent commands over a real daemon RPC socket', () => {
 		expect(coordinator.listFilters).toHaveLength(initialCallCount);
 	});
 
-	it('rejects unsupported or invalid spawn options before making an RPC request', async () => {
+	it('rejects unsupported spawn options as unknown before making an RPC request', async () => {
+		for (const args of [
+			['--name', 'named'],
+			['--system-prompt', 'prompt'],
+		]) {
+			const result = await runCli(socketPath, ['agent', 'spawn', ...args]);
+			expect(result.code).toBe(1);
+			expect(result.stderr).toContain(`unknown option '${args[0]}'`);
+		}
+		expect(coordinator.spawnCalls).toHaveLength(0);
+		expect(modelFactoryCalls).toHaveLength(0);
+	});
+
+	it('rejects invalid bind options before making an RPC request', async () => {
 		const cases: Array<{ args: string[]; message: string }> = [
-			{ args: ['--name', 'named'], message: '--name is not supported' },
-			{ args: ['--system-prompt', 'prompt'], message: '--system-prompt is not supported' },
-			{ args: ['--task', ''], message: '--task requires a non-empty task ID' },
-			{ args: ['--model', ''], message: '--model requires a non-empty model identifier' },
 			{ args: ['--bind', ''], message: 'Invalid bind format' },
 			{ args: ['--bind', 'telegram:'], message: 'Invalid bind format' },
 		];
