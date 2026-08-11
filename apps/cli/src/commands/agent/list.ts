@@ -3,6 +3,7 @@
  * @module commands/agent/list
  */
 
+import type { AgentListFilter, RpcMethods } from '@genii/lib/rpc/methods';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
@@ -20,22 +21,57 @@ import { terminateCommand } from './terminate';
 /**
  * Valid agent statuses for filtering.
  */
-const VALID_STATUSES = ['running', 'paused', 'waiting', 'completed', 'failed', 'terminated'] as const;
+const VALID_STATUSES = [
+	'initializing',
+	'running',
+	'waiting',
+	'paused',
+	'completing',
+	'completed',
+	'failed',
+	'terminated',
+] as const;
+
+type AgentStatus = (typeof VALID_STATUSES)[number];
+
+interface ListCommandOptions {
+	status?: string;
+	channel?: string;
+}
 
 /**
  * Parse comma-separated status filter.
  */
-function parseStatusFilter(statusStr: string | undefined): string[] | undefined {
-	if (!statusStr) {
+function parseStatusFilter(statusStr: string | undefined): AgentStatus[] | undefined {
+	if (statusStr === undefined) {
 		return undefined;
+	}
+	if (statusStr.trim().length === 0) {
+		throw new Error('Invalid status: status cannot be empty');
 	}
 	const statuses = statusStr.split(',').map((s) => s.trim().toLowerCase());
 	for (const status of statuses) {
-		if (!VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+		if (!VALID_STATUSES.includes(status as AgentStatus)) {
 			throw new Error(`Invalid status: ${status}. Valid statuses: ${VALID_STATUSES.join(', ')}`);
 		}
 	}
-	return statuses;
+	return statuses as AgentStatus[];
+}
+
+/**
+ * Parse and validate a channel ID.
+ */
+function parseChannelFilter(channel: string | undefined): AgentListFilter['channelId'] {
+	if (channel === undefined) {
+		return undefined;
+	}
+
+	const channelId = channel.trim();
+	if (channelId.length === 0) {
+		throw new Error('Invalid channel: channel ID cannot be empty');
+	}
+
+	return channelId as NonNullable<AgentListFilter['channelId']>;
 }
 
 /**
@@ -55,57 +91,51 @@ export function listCommand(agent: Command): void {
 		.command('list')
 		.alias('ls')
 		.description('List all agents')
-		.option('--status <statuses>', 'Filter by status (running,paused,waiting,completed,failed,terminated)')
+		.option('--status <statuses>', 'Filter by comma-separated statuses (matches any status)')
 		.option('--channel <id>', 'Filter by bound channel')
-		.action(async (options) => {
+		.action(async (options: ListCommandOptions) => {
 			const globalOpts = agent.parent?.opts() ?? {};
 			const format = getOutputFormat(globalOpts);
 			const formatter = getFormatter(format);
 
+			let statusFilter: AgentStatus[] | undefined;
+			let channelId: AgentListFilter['channelId'];
+			try {
+				statusFilter = parseStatusFilter(options.status);
+				channelId = parseChannelFilter(options.channel);
+			} catch (err) {
+				formatter.error(err instanceof Error ? err : new Error(String(err)));
+				process.exit(1);
+			}
+
+			const filter: AgentListFilter = {};
+			if (statusFilter !== undefined) {
+				filter.status = statusFilter;
+			}
+			if (channelId !== undefined) {
+				filter.channelId = channelId;
+			}
+			const request: RpcMethods['agent.list'] =
+				statusFilter === undefined && channelId === undefined ? {} : { filter };
 			const client = createDaemonClient();
 
 			try {
 				await client.connect();
 
-				// Parse status filter
-				let statusFilter: string[] | undefined;
-				try {
-					statusFilter = parseStatusFilter(options.status);
-				} catch (err) {
-					formatter.error(err instanceof Error ? err : new Error(String(err)));
-					process.exit(1);
-				}
-
 				// Get agents list
-				const agents = await client.listAgents({
-					status: statusFilter?.[0] as 'running' | 'paused' | 'terminated' | 'all' | undefined,
-					includeTerminated: statusFilter?.includes('terminated'),
-				});
-
-				// Filter by channel if specified
-				let filteredAgents = agents;
-				if (options.channel) {
-					// Note: The filter by channel would need to be done client-side
-					// as the current API doesn't support it directly
-					filteredAgents = agents;
-				}
-
-				// Filter by multiple statuses if specified
-				if (statusFilter && statusFilter.length > 1) {
-					filteredAgents = filteredAgents.filter((a) => statusFilter.includes(a.status));
-				}
+				const agents = await client.listAgents(request);
 
 				// Output based on format
 				if (format === 'json') {
-					formatter.success(filteredAgents);
+					formatter.success(agents);
 				} else if (format === 'quiet') {
 					// In quiet mode, just output IDs
-					for (const a of filteredAgents) {
+					for (const a of agents) {
 						formatter.raw(a.id);
 					}
 				} else {
 					// Human-readable table
-					formatter.table(filteredAgents, [
+					formatter.table(agents, [
 						{ header: 'ID', key: 'id', width: 12 },
 						{ header: 'Status', key: 'status', width: 12 },
 						{ header: 'Channel', key: 'conversationCount', width: 10 },

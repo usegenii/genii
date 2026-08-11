@@ -3,12 +3,13 @@
  */
 
 import type { ChannelRegistry } from '@genii/comms/registry/types';
+import { createChannelId } from '@genii/comms/types/core';
 import type { ModelFactory } from '@genii/models/factory';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { AgentHandle } from '@genii/orchestrator/handle/types';
 import type { AgentCheckpoint } from '@genii/orchestrator/snapshot/types';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
-import type { AgentSessionId } from '@genii/orchestrator/types/core';
+import { type AgentSessionId, createAgentSessionId } from '@genii/orchestrator/types/core';
 import { describe, expect, it, vi } from 'vitest';
 import type { ConversationManager } from '../../conversations/manager';
 import type { Logger } from '../../logging/logger';
@@ -75,6 +76,16 @@ function createMockToolRegistry(): ToolRegistryInterface {
 }
 
 /**
+ * Create a mock conversation manager.
+ */
+function createMockConversationManager(): ConversationManager {
+	return {
+		bind: vi.fn(),
+		list: vi.fn(() => []),
+	} as unknown as ConversationManager;
+}
+
+/**
  * Create a mock agent checkpoint.
  */
 function createMockCheckpoint(sessionId: string): AgentCheckpoint {
@@ -135,7 +146,7 @@ function createMockContext(overrides?: Partial<RpcHandlerContext>): RpcHandlerCo
 	return {
 		coordinator: createMockCoordinator(),
 		channelRegistry: {} as ChannelRegistry,
-		conversationManager: {} as ConversationManager,
+		conversationManager: createMockConversationManager(),
 		config: {
 			socketPath: '/tmp/test.sock',
 			storagePath: '/tmp/test-storage',
@@ -170,7 +181,135 @@ function getHandler(
 }
 
 describe('RPC Handlers', () => {
+	describe('handleAgentList', () => {
+		it('should pass orchestrator filters through without querying conversation bindings', async () => {
+			const mockCoordinator = createMockCoordinator();
+			const mockConversationManager = createMockConversationManager();
+			const mockHandle = createMockAgentHandle('running-agent');
+			vi.mocked(mockCoordinator.list).mockReturnValue([mockHandle]);
+
+			const context = createMockContext({
+				coordinator: mockCoordinator,
+				conversationManager: mockConversationManager,
+			});
+			const handlers = createHandlers(context);
+			const agentListHandler = getHandler(handlers, 'agent.list');
+			const filter = {
+				status: ['running', 'waiting'],
+				tags: ['rpc'],
+				parentId: 'parent-session',
+			};
+
+			const result = await agentListHandler({ filter }, context);
+
+			expect(mockCoordinator.list).toHaveBeenCalledWith(filter);
+			expect(mockConversationManager.list).not.toHaveBeenCalled();
+			expect(result).toEqual([
+				{
+					id: mockHandle.id,
+					status: mockHandle.status,
+					tags: mockHandle.config.tags,
+					createdAt: mockHandle.createdAt.toISOString(),
+				},
+			]);
+		});
+
+		it('should intersect coordinator results with non-null agent bindings for a channel', async () => {
+			const mockCoordinator = createMockCoordinator();
+			const mockConversationManager = createMockConversationManager();
+			const matchingHandle = createMockAgentHandle('matching-agent');
+			const unboundHandle = createMockAgentHandle('unbound-agent');
+			const channelId = createChannelId('test-channel');
+			const now = new Date();
+
+			vi.mocked(mockCoordinator.list).mockReturnValue([matchingHandle, unboundHandle]);
+			vi.mocked(mockConversationManager.list).mockReturnValue([
+				{
+					destination: { channelId, ref: 'bound' },
+					agentId: matchingHandle.id,
+					createdAt: now,
+					lastActivityAt: now,
+				},
+				{
+					destination: { channelId, ref: 'unbound' },
+					agentId: null,
+					createdAt: now,
+					lastActivityAt: now,
+				},
+				{
+					destination: { channelId, ref: 'not-listed' },
+					agentId: createAgentSessionId('agent-not-returned-by-coordinator'),
+					createdAt: now,
+					lastActivityAt: now,
+				},
+			]);
+
+			const context = createMockContext({
+				coordinator: mockCoordinator,
+				conversationManager: mockConversationManager,
+			});
+			const handlers = createHandlers(context);
+			const agentListHandler = getHandler(handlers, 'agent.list');
+
+			const result = await agentListHandler(
+				{
+					filter: {
+						status: 'running',
+						tags: ['rpc'],
+						parentId: 'parent-session',
+						channelId,
+					},
+				},
+				context,
+			);
+
+			expect(mockCoordinator.list).toHaveBeenCalledWith({
+				status: 'running',
+				tags: ['rpc'],
+				parentId: 'parent-session',
+			});
+			expect(mockConversationManager.list).toHaveBeenCalledWith({ channelId });
+			expect(result).toEqual([
+				{
+					id: matchingHandle.id,
+					status: matchingHandle.status,
+					tags: matchingHandle.config.tags,
+					createdAt: matchingHandle.createdAt.toISOString(),
+				},
+			]);
+		});
+	});
+
 	describe('handleAgentSpawn', () => {
+		it('should bind the spawned agent before starting it', async () => {
+			const callOrder: string[] = [];
+			const mockCoordinator = createMockCoordinator();
+			const mockConversationManager = createMockConversationManager();
+			const mockHandle = createMockAgentHandle('bound-session');
+			const destination = { channelId: createChannelId('test-channel'), ref: 'test-conversation' };
+
+			vi.mocked(mockCoordinator.spawn).mockResolvedValue(mockHandle);
+			vi.mocked(mockConversationManager.bind).mockImplementation(() => {
+				callOrder.push('bind');
+			});
+			vi.mocked(mockHandle.start).mockImplementation(() => {
+				callOrder.push('start');
+			});
+
+			const context = createMockContext({
+				coordinator: mockCoordinator,
+				conversationManager: mockConversationManager,
+			});
+			const handlers = createHandlers(context);
+			const agentSpawnHandler = getHandler(handlers, 'agent.spawn');
+
+			const result = await agentSpawnHandler({ model: 'test/mock-model', bind: destination }, context);
+
+			expect(mockConversationManager.bind).toHaveBeenCalledWith(destination, mockHandle.id);
+			expect(callOrder).toEqual(['bind', 'start']);
+			expect(result).toEqual({ id: 'bound-session' });
+		});
+
 		it('should pass the exact toolRegistry from context to coordinator.spawn()', async () => {
 			const mockToolRegistry = createMockToolRegistry();
 			const mockCoordinator = createMockCoordinator();
@@ -210,12 +349,14 @@ describe('RPC Handlers', () => {
 
 		it('should still spawn with undefined tools when toolRegistry is not in context', async () => {
 			const mockCoordinator = createMockCoordinator();
+			const mockConversationManager = createMockConversationManager();
 			const mockHandle = createMockAgentHandle('spawned-without-tools');
 
 			vi.mocked(mockCoordinator.spawn).mockResolvedValue(mockHandle);
 
 			const context = createMockContext({
 				coordinator: mockCoordinator,
+				conversationManager: mockConversationManager,
 				toolRegistry: undefined,
 			});
 			const handlers = createHandlers(context);
@@ -230,6 +371,7 @@ describe('RPC Handlers', () => {
 				tags: undefined,
 				tools: undefined,
 			});
+			expect(mockConversationManager.bind).not.toHaveBeenCalled();
 			expect(mockHandle.start).toHaveBeenCalledOnce();
 			expect(result).toEqual({ id: 'spawned-without-tools' });
 		});

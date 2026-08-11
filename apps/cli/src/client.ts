@@ -101,26 +101,9 @@ export interface AgentSnapshot {
 }
 
 /**
- * Filter for listing agents.
- */
-export interface AgentListFilter {
-	status?: 'running' | 'paused' | 'terminated' | 'all';
-	includeTerminated?: boolean;
-}
-
-/**
  * Options for spawning an agent.
  */
-export interface SpawnAgentOptions {
-	name?: string;
-	model?: string;
-	systemPrompt?: string;
-	temperature?: number;
-	maxTokens?: number;
-	metadata?: Record<string, unknown>;
-	/** Initial instruction/message to send to the agent */
-	instruction?: string;
-}
+export type SpawnAgentOptions = RpcMethods['agent.spawn'];
 
 /**
  * Channel summary for listing.
@@ -378,9 +361,9 @@ export interface DaemonClient {
 	reload(): Promise<{ reloaded: string[] }>;
 
 	// Agent methods
-	listAgents(filter?: AgentListFilter): Promise<AgentSummary[]>;
+	listAgents(params?: RpcMethods['agent.list']): Promise<RpcMethodResults['agent.list']>;
 	getAgent(id: string): Promise<AgentDetails>;
-	spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }>;
+	spawnAgent(options: SpawnAgentOptions): Promise<RpcMethodResults['agent.spawn']>;
 	continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }>;
 	listCheckpoints(): Promise<string[]>;
 	terminateAgent(id: string, reason?: string): Promise<void>;
@@ -616,20 +599,16 @@ class SocketDaemonClient implements DaemonClient {
 	// Agent Methods
 	// =========================================================================
 
-	async listAgents(filter?: AgentListFilter): Promise<AgentSummary[]> {
-		return this._request('agent.list', filter);
+	async listAgents(params: RpcMethods['agent.list'] = {}): Promise<RpcMethodResults['agent.list']> {
+		return this._request('agent.list', params);
 	}
 
 	async getAgent(id: string): Promise<AgentDetails> {
 		return this._request('agent.get', { id });
 	}
 
-	async spawnAgent(options: SpawnAgentOptions): Promise<{ id: string }> {
-		const { instruction, ...rest } = options;
-		return this._request('agent.spawn', {
-			...rest,
-			input: instruction ? { message: instruction } : undefined,
-		});
+	async spawnAgent(options: SpawnAgentOptions): Promise<RpcMethodResults['agent.spawn']> {
+		return this._request('agent.spawn', options);
 	}
 
 	async continueAgent(sessionId: string, message: string, model?: string): Promise<{ id: string }> {

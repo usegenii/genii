@@ -37,6 +37,10 @@ export interface AgentDetails extends AgentSummary {
 	parentId?: AgentSessionId;
 }
 
+export interface AgentListFilter extends AgentFilter {
+	channelId?: ChannelId;
+}
+
 export interface ChannelSummary {
 	id: ChannelId;
 	type: string;
@@ -214,7 +218,7 @@ export interface RpcMethods {
 	'daemon.shutdown': { graceful?: boolean; timeoutMs?: number };
 	'daemon.ping': Record<string, never>;
 	'daemon.reload': Record<string, never>;
-	'agent.list': { filter?: AgentFilter };
+	'agent.list': { filter?: AgentListFilter };
 	'agent.get': { id: AgentSessionId };
 	'agent.spawn': {
 		model?: string;
@@ -223,6 +227,7 @@ export interface RpcMethods {
 		input?: AgentInput;
 		tags?: string[];
 		thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+		bind?: Destination;
 	};
 	'agent.terminate': { id: AgentSessionId; reason?: string };
 	'agent.pause': { id: AgentSessionId };
