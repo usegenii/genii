@@ -57,7 +57,7 @@ function createTestInstance(id: string): AgentInstance {
 		}),
 		status: () => 'idle',
 		getPendingRequests: () => [],
-		resolve: () => {},
+		resolve: async () => {},
 	};
 }
 
