@@ -16,7 +16,9 @@ import type {
 	AgentFilter,
 	AgentInput,
 	AgentSessionId,
+	AgentSnapshot,
 	AgentSpawnConfig,
+	AgentStatus,
 	CoordinatorStatus,
 } from '@genii/orchestrator/types/core';
 import pino from 'pino';
@@ -34,6 +36,14 @@ const tsxImportUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')
 const targetAgentId = 'agent-stream-target' as AgentSessionId;
 const decoyAgentId = 'agent-stream-decoy' as AgentSessionId;
 const fatalAgentId = 'agent-stream-fatal' as AgentSessionId;
+const runningAgentId = 'agent-show-running' as AgentSessionId;
+const completedAgentId = 'agent-show-completed' as AgentSessionId;
+const parentAgentId = 'agent-show-parent' as AgentSessionId;
+
+const runningAgentCreatedAt = new Date('2026-08-10T12:00:00.000Z');
+const runningAgentSnapshotAt = Date.parse('2026-08-10T12:00:05.000Z');
+const completedAgentCreatedAt = new Date('2026-08-10T13:00:00.000Z');
+const completedAgentSnapshotAt = Date.parse('2026-08-10T13:00:12.000Z');
 
 interface RunningCli {
 	child: ChildProcess;
@@ -47,12 +57,32 @@ interface TriggerLogger {
 	arm(trigger: () => void): void;
 }
 
-function createTargetHandle(id: AgentSessionId): AgentHandle {
+interface CliJsonEnvelope<T> {
+	ok: boolean;
+	data: T;
+	timestamp: string;
+}
+
+type DaemonStatusJsonData = RpcMethodResults['daemon.status'] & { running: true };
+type AgentShowJsonData = NonNullable<RpcMethodResults['agent.get']> & { duration: string };
+
+interface TestAgentHandleOptions {
+	status: AgentStatus;
+	config?: AgentSpawnConfig;
+	createdAt?: Date;
+	snapshotTimestamp?: number;
+	metrics?: AgentSnapshot['metrics'];
+}
+
+function createAgentHandle(id: AgentSessionId, options: TestAgentHandleOptions): AgentHandle {
+	const createdAt = options.createdAt ?? new Date('2026-08-10T00:00:00.000Z');
+	const metrics = options.metrics ?? { durationMs: 1, turns: 1, toolCalls: 1 };
+
 	return {
 		id,
-		status: 'completed',
-		config: { guidancePath: '/test/guidance' },
-		createdAt: new Date(),
+		status: options.status,
+		config: options.config ?? { guidancePath: '/test/guidance' },
+		createdAt,
 		start: () => {},
 		subscribe: () => () => {},
 		async *events(): AsyncIterable<AgentEvent> {},
@@ -63,11 +93,15 @@ function createTargetHandle(id: AgentSessionId): AgentHandle {
 		wait: async () => ({
 			status: 'completed',
 			output: 'complete',
-			metrics: { durationMs: 1, turns: 1, toolCalls: 1 },
+			metrics,
 		}),
-		snapshot: () => {
-			throw new Error('Snapshot is not used by streaming integration tests');
-		},
+		snapshot: () => ({
+			id: `${id}-snapshot`,
+			sessionId: id,
+			timestamp: options.snapshotTimestamp ?? createdAt.getTime(),
+			status: options.status,
+			metrics,
+		}),
 		getPendingRequests: () => [],
 		resolve: async () => {},
 	};
@@ -75,8 +109,40 @@ function createTargetHandle(id: AgentSessionId): AgentHandle {
 
 class ManualCoordinator implements Coordinator {
 	private readonly _handlers = new Set<(event: CoordinatorEvent) => void>();
-	private readonly _targetHandle = createTargetHandle(targetAgentId);
-	private readonly _fatalHandle = createTargetHandle(fatalAgentId);
+	private readonly _handles = new Map<AgentSessionId, AgentHandle>([
+		[targetAgentId, createAgentHandle(targetAgentId, { status: 'completed' })],
+		[fatalAgentId, createAgentHandle(fatalAgentId, { status: 'completed' })],
+		[
+			runningAgentId,
+			createAgentHandle(runningAgentId, {
+				status: 'running',
+				config: {},
+				createdAt: runningAgentCreatedAt,
+				snapshotTimestamp: runningAgentSnapshotAt,
+				metrics: { durationMs: 5_000, turns: 2, toolCalls: 1 },
+			}),
+		],
+		[
+			completedAgentId,
+			createAgentHandle(completedAgentId, {
+				status: 'completed',
+				config: {
+					guidancePath: '/test/guidance/completed',
+					tags: ['issue-143', 'completed'],
+					metadata: { source: 'rpc-integration' },
+					parentId: parentAgentId,
+				},
+				createdAt: completedAgentCreatedAt,
+				snapshotTimestamp: completedAgentSnapshotAt,
+				metrics: {
+					durationMs: 12_500,
+					turns: 3,
+					toolCalls: 2,
+					tokensUsed: { input: 100, output: 25, total: 125 },
+				},
+			}),
+		],
+	]);
 	private _status: CoordinatorStatus = 'stopped';
 
 	async start(): Promise<void> {
@@ -101,10 +167,7 @@ class ManualCoordinator implements Coordinator {
 	}
 
 	get(id: AgentSessionId): AgentHandle | undefined {
-		if (id === targetAgentId) {
-			return this._targetHandle;
-		}
-		return id === fatalAgentId ? this._fatalHandle : undefined;
+		return this._handles.get(id);
 	}
 
 	getAdapter(_id: AgentSessionId): AgentAdapter | undefined {
@@ -112,7 +175,7 @@ class ManualCoordinator implements Coordinator {
 	}
 
 	list(_filter?: AgentFilter): AgentHandle[] {
-		return [this._targetHandle, this._fatalHandle];
+		return [...this._handles.values()];
 	}
 
 	async listCheckpoints(): Promise<AgentSessionId[]> {
@@ -230,6 +293,10 @@ function jsonLines(output: string): unknown[] {
 		.map((line) => JSON.parse(line) as unknown);
 }
 
+function jsonEnvelope<T>(output: string): CliJsonEnvelope<T> {
+	return JSON.parse(output) as CliJsonEnvelope<T>;
+}
+
 async function waitFor(condition: () => boolean, describeCondition: string, timeoutMs = 5_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
@@ -267,7 +334,7 @@ async function expectRequestError(client: SocketTransportClient, method: string,
 	}
 }
 
-describe('streaming commands over a real daemon RPC socket', () => {
+describe('CLI commands over a real daemon RPC socket', () => {
 	let coordinator: ManualCoordinator;
 	let daemon: Daemon | undefined;
 	let logBuffer: LogBuffer;
@@ -309,6 +376,107 @@ describe('streaming commands over a real daemon RPC socket', () => {
 			await daemon.stop('hard');
 		}
 		await rm(testDirectory, { recursive: true, force: true });
+	});
+
+	it('renders canonical daemon status in human mode', async () => {
+		const result = await runCli(socketPath, ['daemon', 'status']);
+
+		expect(result.stderr).toBe('');
+		expect(result.stdout).toMatch(/^Status[ \t]+running$/m);
+		expect(result.stdout).toMatch(/^Version[ \t]+1\.0\.0$/m);
+		expect(result.stdout).toMatch(/^Uptime[ \t]+\S.*$/m);
+		expect(result.stdout).toMatch(new RegExp(`^Agents[ \\t]+${coordinator.list().length}$`, 'm'));
+		expect(result.stdout).toMatch(/^Channels[ \t]+0$/m);
+		expect(result.stdout).not.toMatch(/^(?:PID|Conversations|Heap Used|Heap Total|RSS)[ \t]+/m);
+		expect(result.stdout).not.toMatch(/undefined|Cannot read properties/i);
+	});
+
+	it('preserves canonical daemon status in JSON mode', async () => {
+		const result = await runCli(socketPath, ['--output', 'json', 'daemon', 'status']);
+		const envelope = jsonEnvelope<DaemonStatusJsonData>(result.stdout);
+
+		expect(result.stderr).toBe('');
+		expect(envelope.ok).toBe(true);
+		expect(envelope.data).toMatchObject({
+			running: true,
+			status: 'running',
+			agentCount: coordinator.list().length,
+			channelCount: 0,
+			version: '1.0.0',
+		});
+		expect(envelope.data.uptimeMs).toEqual(expect.any(Number));
+		expect(envelope.data.uptimeMs).toBeGreaterThanOrEqual(0);
+		expect(envelope.data).not.toHaveProperty('pid');
+		expect(envelope.data).not.toHaveProperty('conversationCount');
+		expect(envelope.data).not.toHaveProperty('memoryUsage');
+	});
+
+	it.each([
+		['running', runningAgentId, '2026-08-10'],
+		['completed', completedAgentId, '2026-08-10'],
+	] as const)('renders a %s agent in human mode', async (status, agentId, timestampDate) => {
+		const result = await runCli(socketPath, ['agent', 'show', agentId]);
+
+		expect(result.stderr).toBe('');
+		expect(result.stdout).toContain(agentId);
+		expect(result.stdout).toMatch(new RegExp(`^Status[ \\t]+${status}$`, 'm'));
+		expect(result.stdout).toMatch(new RegExp(`^Created At[ \\t]+${timestampDate}`, 'm'));
+		expect(result.stdout).toMatch(new RegExp(`^Snapshot At[ \\t]+${timestampDate}`, 'm'));
+		expect(result.stdout).toMatch(/^Duration[ \t]+\S.*$/m);
+		expect(result.stdout).toMatch(/^Turns[ \t]+\d+$/m);
+		expect(result.stdout).toMatch(/^Tool Calls[ \t]+\d+$/m);
+		expect(result.stdout).not.toMatch(
+			/^(?:Model|System Prompt|Temperature|Max Tokens|Last Active|Conversations|Bound Conversations)[ \t]+/m,
+		);
+		expect(result.stdout).not.toMatch(/undefined|Invalid time|Cannot read properties/i);
+
+		if (status === 'completed') {
+			expect(result.stdout).toMatch(/^Guidance Path[ \t]+\/test\/guidance\/completed$/m);
+			expect(result.stdout).toMatch(new RegExp(`^Parent Session[ \\t]+${parentAgentId}$`, 'm'));
+			expect(result.stdout).toMatch(/^Tags[ \t]+.*issue-143.*completed.*$/m);
+			expect(result.stdout).toMatch(/^Metadata[ \t]+.*rpc-integration.*$/m);
+			expect(result.stdout).toMatch(/^Tokens[ \t]+.*125.*$/m);
+		} else {
+			expect(result.stdout).not.toMatch(/^(?:Guidance Path|Parent Session|Tags|Metadata|Tokens)[ \t]+/m);
+		}
+	});
+
+	it.each([
+		['running', runningAgentId, runningAgentCreatedAt.toISOString()],
+		['completed', completedAgentId, completedAgentCreatedAt.toISOString()],
+	] as const)('preserves a %s agent in JSON mode', async (status, agentId, createdAt) => {
+		const result = await runCli(socketPath, ['--output', 'json', 'agent', 'show', agentId]);
+		const envelope = jsonEnvelope<AgentShowJsonData>(result.stdout);
+
+		expect(result.stderr).toBe('');
+		expect(envelope.ok).toBe(true);
+		expect(envelope.data).toMatchObject({
+			id: agentId,
+			status,
+			createdAt,
+			duration: expect.any(String),
+		});
+		expect(envelope.data.duration.length).toBeGreaterThan(0);
+		expect(envelope.data).not.toHaveProperty('model');
+		expect(envelope.data).not.toHaveProperty('lastActiveAt');
+		expect(envelope.data).not.toHaveProperty('conversationCount');
+		expect(envelope.data).not.toHaveProperty('conversations');
+		expect(envelope.data).not.toHaveProperty('snapshot');
+		expect(envelope.data).not.toHaveProperty('metrics');
+
+		if (status === 'completed') {
+			expect(envelope.data).toMatchObject({
+				guidancePath: '/test/guidance/completed',
+				tags: ['issue-143', 'completed'],
+				metadata: { source: 'rpc-integration' },
+				parentId: parentAgentId,
+			});
+		} else {
+			expect(envelope.data).not.toHaveProperty('guidancePath');
+			expect(envelope.data).not.toHaveProperty('tags');
+			expect(envelope.data).not.toHaveProperty('metadata');
+			expect(envelope.data).not.toHaveProperty('parentId');
+		}
 	});
 
 	it('tails only the selected agent across replay, overlap, and live publication', async () => {

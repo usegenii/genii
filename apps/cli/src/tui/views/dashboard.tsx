@@ -5,11 +5,29 @@
 
 import { Box, Text } from 'ink';
 import type React from 'react';
-import { formatUptime } from '../../utils/time';
+import { formatDuration } from '../../utils/time';
 import { ActivityFeed } from '../components/activity-feed';
 import { useAgents } from '../hooks/use-agents';
 import { useChannels } from '../hooks/use-channels';
-import { useDaemon } from '../hooks/use-daemon';
+import { type DaemonStatus, useDaemon } from '../hooks/use-daemon';
+
+interface DaemonPresentation {
+	color: 'green' | 'yellow' | 'red';
+	label: string;
+}
+
+function getDaemonPresentation(connected: boolean, status: DaemonStatus | null): DaemonPresentation {
+	if (!connected) {
+		return { color: 'red', label: 'Disconnected' };
+	}
+	if (!status) {
+		return { color: 'yellow', label: 'Loading' };
+	}
+	if (status.status === 'running') {
+		return { color: 'green', label: 'Running' };
+	}
+	return { color: 'yellow', label: 'Stopping' };
+}
 
 /**
  * Dashboard view showing system overview.
@@ -18,6 +36,7 @@ export function Dashboard(): React.ReactElement {
 	const { status, connected } = useDaemon({});
 	const { agents } = useAgents();
 	const { channels } = useChannels();
+	const daemonPresentation = getDaemonPresentation(connected, status);
 
 	const runningAgents = agents.filter((a) => a.status === 'running').length;
 	const pausedAgents = agents.filter((a) => a.status === 'paused').length;
@@ -53,9 +72,7 @@ export function Dashboard(): React.ReactElement {
 							<Box width={12}>
 								<Text>Status:</Text>
 							</Box>
-							<Text color={connected && status?.running ? 'green' : 'red'}>
-								{connected ? (status?.running ? 'Running' : 'Stopped') : 'Disconnected'}
-							</Text>
+							<Text color={daemonPresentation.color}>{daemonPresentation.label}</Text>
 						</Box>
 						<Box>
 							<Box width={12}>
@@ -67,13 +84,7 @@ export function Dashboard(): React.ReactElement {
 							<Box width={12}>
 								<Text>Uptime:</Text>
 							</Box>
-							<Text>{status?.uptime ? formatUptime(status.uptime) : 'N/A'}</Text>
-						</Box>
-						<Box>
-							<Box width={12}>
-								<Text>PID:</Text>
-							</Box>
-							<Text>{status?.pid ?? 'N/A'}</Text>
+							<Text>{status?.uptimeMs !== undefined ? formatDuration(status.uptimeMs) : 'N/A'}</Text>
 						</Box>
 					</Box>
 				</Box>
