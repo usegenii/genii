@@ -8,11 +8,12 @@
  * - Connection lifecycle management
  */
 
+import type { RpcMethodName } from '@genii/lib/rpc/methods';
 import type { Logger } from '../logging/logger';
 import { MethodNotFoundError } from '../transport/errors';
 import type { Disposable, RpcRequest, TransportConnection, TransportServer } from '../transport/types';
 import type { RpcHandlerContext, RpcMethodHandler } from './handlers';
-import type { RpcMethodName } from './methods';
+import type { RuntimePublisher } from './runtime-publisher';
 import type { SubscriptionManager } from './subscriptions';
 
 // =============================================================================
@@ -46,6 +47,10 @@ export interface RpcServerConfig {
 	handlers: Map<RpcMethodName, RpcMethodHandler>;
 	/** Subscription manager for handling subscriptions */
 	subscriptionManager: SubscriptionManager;
+	/** Shared connection map used by both the server and subscription manager */
+	connections: Map<string, TransportConnection>;
+	/** Runtime event publisher disposed with the RPC server */
+	runtimePublisher: RuntimePublisher;
 	/** Logger instance */
 	logger: Logger;
 }
@@ -87,17 +92,21 @@ class RpcServerImpl implements RpcServer {
 	private readonly _handlerContext: Omit<RpcHandlerContext, 'connection'>;
 	private readonly _handlers: Map<RpcMethodName, RpcMethodHandler>;
 	private readonly _subscriptionManager: SubscriptionManager;
+	private readonly _runtimePublisher: RuntimePublisher;
 	private readonly _logger: Logger;
+	private readonly _connections: Map<string, TransportConnection>;
 
 	private _running = false;
 	private _requestHandlerDisposable: Disposable | null = null;
-	private readonly _connections: Map<string, TransportConnection> = new Map();
+	private _connectionClosedDisposable: Disposable | null = null;
 
 	constructor(config: RpcServerConfig) {
 		this._transport = config.transport;
 		this._handlerContext = config.handlerContext;
 		this._handlers = config.handlers;
 		this._subscriptionManager = config.subscriptionManager;
+		this._runtimePublisher = config.runtimePublisher;
+		this._connections = config.connections;
 		this._logger = config.logger.child({ component: 'RpcServer' });
 	}
 
@@ -112,6 +121,9 @@ class RpcServerImpl implements RpcServer {
 		// Register request handler with transport
 		this._requestHandlerDisposable = this._transport.onRequest(async (request, connection) => {
 			return this._handleRequest(request, connection);
+		});
+		this._connectionClosedDisposable = this._transport.onConnectionClosed((connectionId) => {
+			this.handleConnectionClosed(connectionId);
 		});
 
 		// Start the transport
@@ -143,6 +155,11 @@ class RpcServerImpl implements RpcServer {
 
 		// Close the transport
 		await this._transport.close();
+		if (this._connectionClosedDisposable) {
+			this._connectionClosedDisposable.dispose();
+			this._connectionClosedDisposable = null;
+		}
+		this._runtimePublisher.dispose();
 
 		this._running = false;
 		this._logger.info('RPC server stopped');

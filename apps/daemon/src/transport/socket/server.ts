@@ -9,6 +9,7 @@ import type { Logger } from '../../logging/logger';
 import { createFramedHandler, encode } from '../codec';
 import { RpcException } from '../errors';
 import type {
+	ConnectionClosedHandler,
 	Disposable,
 	RequestHandler,
 	RpcNotification,
@@ -96,6 +97,7 @@ export class SocketTransportServer implements TransportServer {
 	private readonly _config: SocketServerConfig;
 	private readonly _logger: Logger;
 	private readonly _requestHandlers: Set<RequestHandler> = new Set();
+	private readonly _connectionClosedHandlers: Set<ConnectionClosedHandler> = new Set();
 	private readonly _connections: Map<string, SocketConnection> = new Map();
 
 	private _server: import('node:net').Server | null = null;
@@ -206,6 +208,15 @@ export class SocketTransportServer implements TransportServer {
 		};
 	}
 
+	onConnectionClosed(handler: ConnectionClosedHandler): Disposable {
+		this._connectionClosedHandlers.add(handler);
+		return {
+			dispose: () => {
+				this._connectionClosedHandlers.delete(handler);
+			},
+		};
+	}
+
 	/**
 	 * Broadcast a notification to all connected clients.
 	 *
@@ -264,6 +275,13 @@ export class SocketTransportServer implements TransportServer {
 		socket.on('close', () => {
 			connection.markClosed();
 			this._connections.delete(connectionId);
+			for (const handler of this._connectionClosedHandlers) {
+				try {
+					handler(connectionId);
+				} catch (error) {
+					this._logger.warn({ error, connectionId }, 'Connection close handler failed');
+				}
+			}
 			this._logger.debug({ connectionId }, 'Connection closed');
 		});
 

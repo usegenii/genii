@@ -24,6 +24,7 @@ import { createModelFactory } from '@genii/models/factory';
 import { initializeChannels } from './channels/init';
 import type { Daemon } from './daemon';
 import { type CreateDaemonOptions, createDaemon, resolveDaemonLogLevel } from './factory';
+import { createLogBuffer } from './logging/buffer';
 import { createLogger, type LogLevel } from './logging/logger';
 
 /** Interval for second SIGINT detection (hard shutdown) */
@@ -272,7 +273,8 @@ export async function main(): Promise<void> {
 	// File logging is only enabled when --log-dir is explicitly passed (e.g. by `genii daemon start`).
 	// Running genii-daemon directly logs to stdout.
 	const logDir = args.logDir;
-	const logger = createLogger({ level: logLevel, logDir });
+	const logBuffer = createLogBuffer();
+	const logger = createLogger({ level: logLevel, logDir, logBuffer });
 
 	// Set up error handlers
 	setupErrorHandlers(logger);
@@ -297,6 +299,8 @@ export async function main(): Promise<void> {
 		modelFactory,
 		channelRegistry,
 		config,
+		logger,
+		logBuffer,
 	};
 	if (args.socketPath !== undefined) {
 		options.socketPath = args.socketPath;

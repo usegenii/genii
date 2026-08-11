@@ -5,6 +5,8 @@
  */
 
 import type * as net from 'node:net';
+import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import type { RpcNotification } from '@genii/lib/rpc/notifications';
 
 // =============================================================================
 // Transport Types (copied from daemon for CLI independence)
@@ -26,14 +28,6 @@ interface RpcResponse {
 	readonly id: string;
 	readonly result?: unknown;
 	readonly error?: RpcError;
-}
-
-/**
- * RPC notification (no response expected).
- */
-interface RpcNotification {
-	readonly method: string;
-	readonly params?: unknown;
 }
 
 /**
@@ -420,9 +414,14 @@ export interface DaemonClient {
 	triggerJob(name: string): Promise<void>;
 
 	// Subscriptions
-	subscribe(type: string, filter?: unknown): Promise<string>;
-	unsubscribe(subscriptionId: string): Promise<void>;
-	onNotification(handler: (method: string, params: unknown) => void): () => void;
+	subscribeAgents(params?: RpcMethods['subscribe.agents']): Promise<RpcMethodResults['subscribe.agents']>;
+	subscribeAgentOutput(
+		params: RpcMethods['subscribe.agent.output'],
+	): Promise<RpcMethodResults['subscribe.agent.output']>;
+	subscribeChannels(): Promise<RpcMethodResults['subscribe.channels']>;
+	subscribeLogs(params: RpcMethods['subscribe.logs']): Promise<RpcMethodResults['subscribe.logs']>;
+	unsubscribe(subscriptionId: string): Promise<RpcMethodResults['unsubscribe']>;
+	onNotification(handler: (notification: RpcNotification) => void): () => void;
 }
 
 // =============================================================================
@@ -436,7 +435,7 @@ class SocketDaemonClient implements DaemonClient {
 	private readonly _socketPath: string;
 	private readonly _connectTimeoutMs: number;
 	private readonly _requestTimeoutMs: number;
-	private readonly _notificationHandlers: Set<(method: string, params: unknown) => void> = new Set();
+	private readonly _notificationHandlers: Set<(notification: RpcNotification) => void> = new Set();
 	private readonly _pendingRequests: Map<string, PendingRequest> = new Map();
 	private readonly _decoder = new LineDecoder();
 
@@ -586,7 +585,7 @@ class SocketDaemonClient implements DaemonClient {
 	private _handleNotification(notification: RpcNotification): void {
 		for (const handler of this._notificationHandlers) {
 			try {
-				handler(notification.method, notification.params);
+				handler(notification);
 			} catch {
 				// Ignore handler errors
 			}
@@ -750,15 +749,29 @@ class SocketDaemonClient implements DaemonClient {
 	// Subscription Methods
 	// =========================================================================
 
-	async subscribe(type: string, filter?: unknown): Promise<string> {
-		return this._request('subscribe', { type, filter });
+	async subscribeAgents(params: RpcMethods['subscribe.agents'] = {}): Promise<RpcMethodResults['subscribe.agents']> {
+		return this._request('subscribe.agents', params);
 	}
 
-	async unsubscribe(subscriptionId: string): Promise<void> {
+	async subscribeAgentOutput(
+		params: RpcMethods['subscribe.agent.output'],
+	): Promise<RpcMethodResults['subscribe.agent.output']> {
+		return this._request('subscribe.agent.output', params);
+	}
+
+	async subscribeChannels(): Promise<RpcMethodResults['subscribe.channels']> {
+		return this._request('subscribe.channels', {});
+	}
+
+	async subscribeLogs(params: RpcMethods['subscribe.logs']): Promise<RpcMethodResults['subscribe.logs']> {
+		return this._request('subscribe.logs', params);
+	}
+
+	async unsubscribe(subscriptionId: string): Promise<RpcMethodResults['unsubscribe']> {
 		return this._request('unsubscribe', { subscriptionId });
 	}
 
-	onNotification(handler: (method: string, params: unknown) => void): () => void {
+	onNotification(handler: (notification: RpcNotification) => void): () => void {
 		this._notificationHandlers.add(handler);
 		return () => {
 			this._notificationHandlers.delete(handler);

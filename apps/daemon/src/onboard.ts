@@ -10,8 +10,8 @@
 import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { templates } from '@genii/guidance/templates';
+import type { OnboardResult, OnboardStatus } from '@genii/lib/rpc/methods';
 import type { Logger } from './logging/logger';
-import type { OnboardResult, OnboardStatus } from './rpc/methods';
 
 /**
  * Template files to copy during onboarding.

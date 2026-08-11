@@ -75,8 +75,9 @@ export function ActivityFeed({ limit = 10, events: externalEvents }: ActivityFee
 				setConnected(true);
 
 				// Subscribe to notifications
-				unsubscribe = client.onNotification((method, params) => {
-					const eventParams = params as {
+				unsubscribe = client.onNotification((notification) => {
+					const { method } = notification;
+					const eventParams = notification.params as unknown as {
 						type?: string;
 						message?: string;
 						details?: Record<string, unknown>;

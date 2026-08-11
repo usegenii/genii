@@ -9,16 +9,6 @@
 
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { Config } from '@genii/config/config';
-import type { ModelFactory } from '@genii/models/factory';
-import type { Coordinator } from '@genii/orchestrator/coordinator/types';
-import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
-import type { ConversationManager } from '../conversations/manager';
-import type { Logger } from '../logging/logger';
-import { resolveDefaultModel } from '../models/resolve';
-import { executeOnboard, getOnboardStatus } from '../onboard';
-import type { SchedulerLifecycle } from '../scheduler/types';
-import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
-import type { TransportConnection } from '../transport/types';
 import type {
 	AgentDetails,
 	AgentSummary,
@@ -34,7 +24,17 @@ import type {
 	RpcMethodResults,
 	RpcMethods,
 	SchedulerJobInfo,
-} from './methods';
+} from '@genii/lib/rpc/methods';
+import type { ModelFactory } from '@genii/models/factory';
+import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import type { ConversationManager } from '../conversations/manager';
+import type { Logger } from '../logging/logger';
+import { resolveDefaultModel } from '../models/resolve';
+import { executeOnboard, getOnboardStatus } from '../onboard';
+import type { SchedulerLifecycle } from '../scheduler/types';
+import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
+import type { TransportConnection } from '../transport/types';
 import type { SubscriptionManager } from './subscriptions';
 
 // =============================================================================
@@ -575,7 +575,12 @@ async function handleConversationGet(
 		agentId: binding.agentId,
 		createdAt: binding.createdAt.toISOString(),
 		lastActivityAt: binding.lastActivityAt.toISOString(),
-		binding,
+		binding: {
+			destination: binding.destination,
+			agentId: binding.agentId,
+			createdAt: binding.createdAt.toISOString(),
+			lastActivityAt: binding.lastActivityAt.toISOString(),
+		},
 	};
 }
 
@@ -617,7 +622,8 @@ async function handleSubscribeAgentOutput(
 	}
 
 	const subscriptionId = subscriptionManager.subscribe(connection.id, 'agent.output', { agentId: params.id });
-	return { subscriptionId };
+	const events = subscriptionManager.getAgentEvents(params.id);
+	return { subscriptionId, events };
 }
 
 async function handleSubscribeChannels(context: RpcHandlerContext): Promise<RpcMethodResults['subscribe.channels']> {
@@ -631,8 +637,9 @@ async function handleSubscribeLogs(
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['subscribe.logs']> {
 	const { subscriptionManager, connection } = context;
-	const subscriptionId = subscriptionManager.subscribe(connection.id, 'logs', { level: params.level });
-	return { subscriptionId };
+	const subscriptionId = subscriptionManager.subscribe(connection.id, 'logs', params);
+	const entries = subscriptionManager.getLogEntries(params);
+	return { subscriptionId, entries };
 }
 
 async function handleUnsubscribe(

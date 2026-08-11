@@ -5,6 +5,8 @@
  * (Unix sockets, named pipes, etc.) from the RPC protocol.
  */
 
+import type { RpcNotification as CanonicalRpcNotification } from '@genii/lib/rpc/notifications';
+
 // =============================================================================
 // RPC Message Types
 // =============================================================================
@@ -33,15 +35,8 @@ export interface RpcResponse {
 	readonly error?: RpcError;
 }
 
-/**
- * RPC notification (no response expected).
- */
-export interface RpcNotification {
-	/** Notification method name */
-	readonly method: string;
-	/** Optional parameters */
-	readonly params?: unknown;
-}
+/** RPC notification (no response expected). */
+export type RpcNotification = CanonicalRpcNotification;
 
 /**
  * RPC error object.
@@ -103,6 +98,9 @@ export interface TransportConnection {
  */
 export type RequestHandler = (request: RpcRequest, connection: TransportConnection) => Promise<unknown>;
 
+/** Called when a client transport connection is closed. */
+export type ConnectionClosedHandler = (connectionId: string) => void;
+
 /**
  * A transport server accepts incoming connections.
  */
@@ -124,6 +122,9 @@ export interface TransportServer {
 	 * @returns Disposable to remove the handler
 	 */
 	onRequest(handler: RequestHandler): Disposable;
+
+	/** Register a handler for connection close lifecycle events. */
+	onConnectionClosed(handler: ConnectionClosedHandler): Disposable;
 
 	/**
 	 * Broadcast a notification to all connected clients.

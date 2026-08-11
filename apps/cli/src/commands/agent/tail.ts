@@ -3,6 +3,8 @@
  * @module commands/agent/tail
  */
 
+import type { AgentOutputRecord, RpcMethods } from '@genii/lib/rpc/methods';
+import type { RpcNotificationParams } from '@genii/lib/rpc/notifications';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
@@ -32,19 +34,20 @@ function parseIncludeOption(include: string | undefined): Set<IncludeType> {
 }
 
 /**
+ * Format an arbitrary event value for display.
+ */
+function formatValue(value: unknown): string {
+	if (typeof value === 'string') {
+		return value;
+	}
+	return JSON.stringify(value, null, 2) ?? String(value);
+}
+
+/**
  * Format a tool call for display.
  */
-function formatToolCall(toolCall: unknown): string {
-	if (typeof toolCall !== 'object' || toolCall === null) {
-		return String(toolCall);
-	}
-
-	const tc = toolCall as Record<string, unknown>;
-	const name = tc.name ?? 'unknown';
-	const args = tc.arguments ?? tc.args ?? {};
-
-	const argsStr = typeof args === 'string' ? args : JSON.stringify(args, null, 2);
-	return `${chalk.cyan(String(name))}(${chalk.gray(argsStr)})`;
+function formatToolCall(toolName: string, input: unknown): string {
+	return `${chalk.cyan(toolName)}(${chalk.gray(formatValue(input))})`;
 }
 
 /**
@@ -61,50 +64,55 @@ function formatThinking(thinking: unknown): string {
  * Format output event for human display.
  */
 function formatOutputEvent(
-	event: Record<string, unknown>,
+	event: AgentOutputRecord['event'],
 	includeTypes: Set<IncludeType>,
 	showTimestamps: boolean,
 ): string | null {
-	const eventType = event.type as string;
-	const timestamp = showTimestamps ? `${chalk.gray(formatTimestamp(Date.now()))} ` : '';
+	const timestamp = showTimestamps ? `${chalk.gray(formatTimestamp(event.timestamp))} ` : '';
 
-	switch (eventType) {
-		case 'text':
-		case 'content':
-		case 'message':
-			return `${timestamp}${event.content ?? event.text ?? ''}`;
+	switch (event.type) {
+		case 'output':
+			return `${timestamp}${event.text}`;
 
-		case 'thinking':
+		case 'thought':
 			if (!includeTypes.has('thinking')) {
 				return null;
 			}
-			return `${timestamp}${chalk.magenta('[thinking]')} ${formatThinking(event.content ?? event.thinking)}`;
+			return `${timestamp}${chalk.magenta('[thinking]')} ${formatThinking(event.content)}`;
 
-		case 'tool_call':
-		case 'tool':
+		case 'tool_start':
 			if (!includeTypes.has('tools')) {
 				return null;
 			}
-			return `${timestamp}${chalk.yellow('[tool]')} ${formatToolCall(event)}`;
+			return `${timestamp}${chalk.yellow('[tool]')} ${formatToolCall(event.toolName, event.input)}`;
 
-		case 'tool_result':
+		case 'tool_progress':
 			if (!includeTypes.has('tools')) {
 				return null;
 			}
-			return `${timestamp}${chalk.green('[result]')} ${chalk.gray(String(event.result ?? event.output ?? ''))}`;
+			return `${timestamp}${chalk.yellow('[tool]')} ${chalk.cyan(event.toolName)}: ${event.progress.message ?? 'In progress'}`;
+
+		case 'tool_end': {
+			if (!includeTypes.has('tools')) {
+				return null;
+			}
+			const result = event.error ? chalk.red(event.error) : chalk.gray(formatValue(event.output));
+			return `${timestamp}${chalk.green('[result]')} ${chalk.cyan(event.toolName)}: ${result}`;
+		}
 
 		case 'error':
-			return `${timestamp}${chalk.red('[error]')} ${event.message ?? event.error ?? 'Unknown error'}`;
+			return `${timestamp}${chalk.red('[error]')} ${event.error}`;
 
 		case 'done':
-		case 'complete':
 			return `${timestamp}${chalk.blue('[done]')}`;
 
+		case 'status':
+			return `${timestamp}${chalk.blue('[status]')} ${event.status}`;
+
+		case 'suspended':
+			return `${timestamp}${chalk.yellow('[suspended]')} ${event.pendingRequests.length} pending request(s)`;
+
 		default:
-			// For unknown event types, output the raw content if any
-			if (event.content) {
-				return `${timestamp}${event.content}`;
-			}
 			return null;
 	}
 }
@@ -134,29 +142,80 @@ export function tailCommand(agent: Command): void {
 			const client = createDaemonClient();
 			let subscriptionId: string | null = null;
 			let unsubscribeHandler: (() => void) | null = null;
+			let cleanupPromise: Promise<void> | null = null;
+			let completed = false;
+			let resolveCompletion: () => void = () => {};
+			const completion = new Promise<void>((resolve) => {
+				resolveCompletion = resolve;
+			});
+			const bufferedNotifications: RpcNotificationParams['agent.output'][] = [];
+			let lastSequence = -1;
+			let replaying = true;
+			let signalHandler: (() => void) | null = null;
 
-			// Setup cleanup handler for Ctrl+C
-			const cleanup = async () => {
-				if (subscriptionId && client.connected) {
-					try {
-						await client.unsubscribe(subscriptionId);
-					} catch {
-						// Ignore unsubscribe errors during cleanup
+			const cleanup = (): Promise<void> => {
+				if (cleanupPromise) {
+					return cleanupPromise;
+				}
+
+				cleanupPromise = (async () => {
+					if (signalHandler) {
+						process.off('SIGINT', signalHandler);
+						process.off('SIGTERM', signalHandler);
 					}
-				}
-				if (unsubscribeHandler) {
-					unsubscribeHandler();
-				}
-				await client.disconnect();
-				process.exit(0);
+					unsubscribeHandler?.();
+					unsubscribeHandler = null;
+					if (subscriptionId && client.connected) {
+						try {
+							await client.unsubscribe(subscriptionId);
+						} catch {
+							// The daemon may already have released a completed subscription.
+						}
+					}
+					await client.disconnect();
+				})();
+
+				return cleanupPromise;
 			};
 
-			process.on('SIGINT', () => {
-				void cleanup();
-			});
-			process.on('SIGTERM', () => {
-				void cleanup();
-			});
+			signalHandler = () => {
+				void cleanup().finally(() => process.exit(0));
+			};
+			process.on('SIGINT', signalHandler);
+			process.on('SIGTERM', signalHandler);
+
+			const writeRecord = (record: AgentOutputRecord): void => {
+				if (record.agentId !== agentId || record.sequence <= lastSequence) {
+					return;
+				}
+
+				lastSequence = record.sequence;
+				const { event } = record;
+
+				if (format === 'json') {
+					console.log(JSON.stringify(event));
+				} else if (format === 'quiet') {
+					if (event.type === 'output') {
+						console.log(event.text);
+					}
+				} else {
+					const formatted = formatOutputEvent(event, includeTypes, true);
+					if (formatted !== null) {
+						console.log(formatted);
+					}
+				}
+
+				if ((event.type === 'done' || (event.type === 'error' && event.fatal)) && !completed) {
+					completed = true;
+					resolveCompletion();
+				}
+			};
+
+			const writeOrderedRecords = (records: AgentOutputRecord[]): void => {
+				for (const record of [...records].sort((left, right) => left.sequence - right.sequence)) {
+					writeRecord(record);
+				}
+			};
 
 			try {
 				await client.connect();
@@ -169,52 +228,43 @@ export function tailCommand(agent: Command): void {
 					process.exit(1);
 				}
 
-				// Subscribe to agent output notifications
-				subscriptionId = await client.subscribe('agent.output', { agentId });
+				// Register before subscribing so notifications sent alongside the response are buffered.
+				unsubscribeHandler = client.onNotification((notification) => {
+					if (notification.method !== 'agent.output' || notification.params.agentId !== agentId) {
+						return;
+					}
+
+					if (subscriptionId === null || replaying) {
+						bufferedNotifications.push(notification.params);
+						return;
+					}
+
+					if (notification.params.subscriptionId !== subscriptionId) {
+						return;
+					}
+					writeRecord(notification.params);
+				});
+
+				const result = await client.subscribeAgentOutput({
+					id: agentId as RpcMethods['subscribe.agent.output']['id'],
+				});
+				subscriptionId = result.subscriptionId;
 
 				if (format === 'human') {
 					formatter.message(`Tailing agent ${agentId} output (Ctrl+C to stop)...`, 'info');
 				}
 
-				// Handle incoming notifications
-				unsubscribeHandler = client.onNotification((method, params) => {
-					if (method !== 'agent.output') {
-						return;
-					}
+				const bufferedForSubscription = bufferedNotifications.filter(
+					(notification) => notification.subscriptionId === subscriptionId,
+				);
+				bufferedNotifications.length = 0;
+				writeOrderedRecords([...result.events, ...bufferedForSubscription]);
+				replaying = false;
 
-					const notification = params as Record<string, unknown>;
-
-					// Filter by agent ID
-					if (notification.agentId !== agentId) {
-						return;
-					}
-
-					const event = notification.event as Record<string, unknown> | undefined;
-					if (!event) {
-						return;
-					}
-
-					if (format === 'json') {
-						// In JSON mode, output raw events
-						console.log(JSON.stringify(event));
-					} else if (format === 'quiet') {
-						// In quiet mode, only output text content
-						if (event.type === 'text' || event.type === 'content' || event.type === 'message') {
-							console.log(event.content ?? event.text ?? '');
-						}
-					} else {
-						// Human-readable format
-						const formatted = formatOutputEvent(event, includeTypes, true);
-						if (formatted !== null) {
-							console.log(formatted);
-						}
-					}
-				});
-
-				// Keep the process running until interrupted
-				await new Promise(() => {
-					// This promise never resolves - we wait for SIGINT/SIGTERM
-				});
+				if (!completed) {
+					await completion;
+				}
+				await cleanup();
 			} catch (err) {
 				formatter.error(err instanceof Error ? err : new Error(String(err)));
 				await cleanup();

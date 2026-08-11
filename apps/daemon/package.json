@@ -43,6 +43,7 @@
 		"@genii/comms": "workspace:*",
 		"@genii/config": "workspace:*",
 		"@genii/guidance": "workspace:*",
+		"@genii/lib": "workspace:*",
 		"@genii/models": "workspace:*",
 		"@genii/orchestrator": "workspace:*",
 		"croner": "9.1.0",
