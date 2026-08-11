@@ -5,13 +5,14 @@
 
 import { join } from 'node:path';
 import { readTomlTableMapOptional } from '../loaders/toml.js';
+import type { ProviderApiType } from '../types/provider.js';
 import { writeTomlTableMap } from './toml.js';
 
 /**
  * Provider configuration for writing.
  */
 export interface ProviderConfigWrite {
-	type: 'anthropic' | 'openai';
+	type: ProviderApiType;
 	baseUrl: string;
 	credential: string; // Format: "secret:provider-api-key"
 }
@@ -24,7 +25,7 @@ export interface ProviderConfigWrite {
  * @param providers - Provider configs keyed by name
  *
  * @example
- * await saveProvidersConfig('/home/user/.config/genii', {
+ * await saveProvidersConfig('/home/user/.local/share/genii', {
  *   zai: {
  *     type: 'anthropic',
  *     baseUrl: 'https://api.zai.com',

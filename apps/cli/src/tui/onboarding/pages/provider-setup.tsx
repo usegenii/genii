@@ -4,7 +4,7 @@
  * @module tui/onboarding/pages/provider-setup
  */
 
-import type { AuthMethod, ProviderDefinition } from '@genii/config/providers/definitions';
+import type { AuthMethod, ModelDefinition, ProviderDefinition } from '@genii/config/providers/definitions';
 import {
 	BUILTIN_PROVIDERS,
 	CUSTOM_PROVIDER_DEFINITION,
@@ -12,6 +12,7 @@ import {
 	getProvider,
 } from '@genii/config/providers/definitions';
 import type { SetupField } from '@genii/config/providers/types';
+import { isProviderApiType } from '@genii/config/types/provider';
 import { Box, Text, useInput } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
@@ -23,7 +24,7 @@ import { TextInputField } from '../components/text-input-field';
 import { getExistingModelsForProvider } from '../existing-config-loader';
 import { useTerminalTheme } from '../hooks/use-terminal-theme';
 import { useWizardKeyboard } from '../hooks/use-wizard-keyboard';
-import type { ExistingProviderInfo, ProviderInstanceState, WizardPageProps } from '../types';
+import type { ExistingModelInfo, ExistingProviderInfo, ProviderInstanceState, WizardPageProps } from '../types';
 
 type SetupStep = 'list' | 'selectProvider' | 'commonFields' | 'authFields' | 'models';
 
@@ -44,12 +45,12 @@ const RESERVED_IDS = new Set(['custom', ...BUILTIN_PROVIDERS.map((p) => p.id)]);
  * Validate a custom provider slug.
  * Returns an error message or null if valid.
  */
-function validateSlug(slug: string, existingProviderIds: string[], editingId?: string): string | null {
+export function validateSlug(slug: string, existingProviderIds: string[], editingId?: string): string | null {
 	if (!slug) return 'Provider name is required';
 	if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
 		return 'Must start with a letter and contain only lowercase letters, numbers, and hyphens';
 	}
-	if (RESERVED_IDS.has(slug)) {
+	if (RESERVED_IDS.has(slug) && slug !== editingId) {
 		return `"${slug}" is a reserved provider name`;
 	}
 	if (slug !== editingId && existingProviderIds.includes(slug)) {
@@ -61,7 +62,9 @@ function validateSlug(slug: string, existingProviderIds: string[], editingId?: s
 /**
  * Convert existing provider configs to ProviderInstanceState objects.
  */
-function existingToInstanceStates(existingConfig: WizardPageProps['state']['existingConfig']): ProviderInstanceState[] {
+export function existingToInstanceStates(
+	existingConfig: WizardPageProps['state']['existingConfig'],
+): ProviderInstanceState[] {
 	if (!existingConfig?.providers || existingConfig.providers.length === 0) return [];
 
 	return existingConfig.providers.map((ep) => {
@@ -78,12 +81,50 @@ function existingToInstanceStates(existingConfig: WizardPageProps['state']['exis
 			isExisting: true,
 			custom: isCustom
 				? {
-						apiType: (ep.config.type as 'anthropic' | 'openai') ?? 'anthropic',
+						apiType: ep.config.type,
 						baseUrl: ep.config.baseUrl ?? '',
 					}
 				: undefined,
 		};
 	});
+}
+
+/**
+ * Build selectable model options, including existing aliases that are not in the built-in catalog.
+ */
+export function buildModelOptions(
+	availableModels: readonly ModelDefinition[],
+	existingModels: readonly ExistingModelInfo[],
+): MultiSelectOption[] {
+	const existingModelsById = new Map(existingModels.map((model) => [model.modelId, model]));
+	const builtinModelIds = new Set(availableModels.map((model) => model.id));
+	const options = availableModels.map((model) => {
+		const existingModel = existingModelsById.get(model.id);
+		const description: string[] = [];
+		if (existingModel && existingModel.config.modelId !== model.id) {
+			description.push(`Model ID: ${existingModel.config.modelId}`);
+		}
+		if (model.contextWindow) {
+			description.push(`Context: ${(model.contextWindow / 1000).toFixed(0)}k tokens`);
+		}
+
+		return {
+			value: model.id,
+			label: existingModel ? `${model.name} [existing]` : model.name,
+			description: description.length > 0 ? description.join('; ') : undefined,
+		};
+	});
+
+	for (const model of existingModels) {
+		if (builtinModelIds.has(model.modelId)) continue;
+		options.push({
+			value: model.modelId,
+			label: `${model.modelId} [existing]`,
+			description: model.config.modelId === model.modelId ? undefined : `Model ID: ${model.config.modelId}`,
+		});
+	}
+
+	return options;
 }
 
 /**
@@ -124,8 +165,8 @@ export function ProviderSetupPage({
 	const [values, setValues] = useState<Record<string, string>>({});
 	const [focusedIndex, setFocusedIndex] = useState(0);
 
-	// Slug validation state
-	const [slugError, setSlugError] = useState<string | null>(null);
+	// Common-field validation state
+	const [commonFieldsError, setCommonFieldsError] = useState<string | null>(null);
 
 	// Model selection working state
 	const [customModelInput, setCustomModelInput] = useState('');
@@ -201,7 +242,7 @@ export function ProviderSetupPage({
 				apiKey: inst.apiKey ?? inst.custom?.apiKey ?? '',
 			});
 			setFocusedIndex(0);
-			setSlugError(null);
+			setCommonFieldsError(null);
 			setCustomModelInput('');
 			setModelFocusMode('list');
 
@@ -293,7 +334,7 @@ export function ProviderSetupPage({
 		setAuthMethod(selectedAuthMethod);
 		setExistingProviderInfo(existingInfo ?? null);
 		setFocusedIndex(0);
-		setSlugError(null);
+		setCommonFieldsError(null);
 		setCustomModelInput('');
 		setModelFocusMode('list');
 
@@ -336,15 +377,21 @@ export function ProviderSetupPage({
 	const handleCommonFieldsSubmit = () => {
 		// Validate slug for custom providers
 		if (providerDef?.id === 'custom') {
+			const apiType = values.apiType ?? '';
+			if (!isProviderApiType(apiType)) {
+				setCommonFieldsError('Select a supported API type');
+				return;
+			}
+
 			const slug = values.slug?.trim() ?? '';
 			const existingIds = state.providers.map((p) => p.id);
 			const editingId = editingIndex !== null ? state.providers[editingIndex]?.id : undefined;
 			const error = validateSlug(slug, existingIds, editingId);
 			if (error) {
-				setSlugError(error);
+				setCommonFieldsError(error);
 				return;
 			}
-			setSlugError(null);
+			setCommonFieldsError(null);
 			// Update working provider id from slug
 			if (workingProvider) {
 				setWorkingProvider({ ...workingProvider, id: slug });
@@ -384,11 +431,18 @@ export function ProviderSetupPage({
 		// Build updated working provider from current values
 		let updated: ProviderInstanceState;
 		if (workingProvider.type === 'custom' || providerDef?.id === 'custom') {
+			const apiType = values.apiType ?? '';
+			if (!isProviderApiType(apiType)) {
+				setCommonFieldsError('Select a supported API type');
+				setStep('commonFields');
+				return;
+			}
+
 			updated = {
 				...workingProvider,
 				type: 'custom',
 				custom: {
-					apiType: (values.apiType as 'anthropic' | 'openai') ?? 'anthropic',
+					apiType,
 					baseUrl: values.baseUrl ?? '',
 					apiKey: values.apiKey,
 				},
@@ -434,30 +488,16 @@ export function ProviderSetupPage({
 	const isCustomProvider = workingProvider?.type === 'custom';
 	const availableModels = isCustomProvider ? [] : getModelsForProvider(workingProviderId);
 	const existingModelsForProvider = getExistingModelsForProvider(state.existingConfig, workingProviderId);
-	const existingModelIds = new Set(existingModelsForProvider.map((m) => m.modelId));
-	const builtinModelIds = new Set(availableModels.map((m) => m.id));
 	const workingSelectedModels = workingProvider?.selectedModels ?? [];
-	const customModels = workingSelectedModels.filter((id) => !builtinModelIds.has(id) && !existingModelIds.has(id));
-	const showBuiltinList = availableModels.length > 0;
-	const effectiveModelFocusMode = showBuiltinList ? modelFocusMode : 'input';
-
-	const modelOptions: MultiSelectOption[] = availableModels.map((model) => {
-		const isExisting = existingModelIds.has(model.id);
-		return {
-			value: model.id,
-			label: isExisting ? `${model.name} [existing]` : model.name,
-			description: model.contextWindow
-				? `Context: ${(model.contextWindow / 1000).toFixed(0)}k tokens`
-				: undefined,
-		};
-	});
+	const modelOptions = buildModelOptions(availableModels, existingModelsForProvider);
+	const selectableModelIds = new Set(modelOptions.map((option) => option.value));
+	const customModels = workingSelectedModels.filter((id) => !selectableModelIds.has(id));
+	const showModelList = modelOptions.length > 0;
+	const effectiveModelFocusMode = showModelList ? modelFocusMode : 'input';
 
 	const handleModelChange = (selected: string[]) => {
 		if (!workingProvider) return;
-		const existingStillSelected = existingModelsForProvider
-			.filter((m) => selected.includes(m.modelId) || customModels.includes(m.modelId))
-			.map((m) => m.modelId);
-		const newSelection = [...new Set([...selected, ...customModels, ...existingStillSelected])];
+		const newSelection = [...new Set([...selected, ...customModels])];
 		setWorkingProvider({ ...workingProvider, selectedModels: newSelection });
 	};
 
@@ -656,15 +696,15 @@ export function ProviderSetupPage({
 						values={values}
 						onChange={(fieldId, value) => {
 							handleValuesChange(fieldId, value);
-							if (fieldId === 'slug') setSlugError(null);
+							if (fieldId === 'slug' || fieldId === 'apiType') setCommonFieldsError(null);
 						}}
 						focusedIndex={focusedIndex}
 						onFocusChange={setFocusedIndex}
 						onSubmit={handleCommonFieldsSubmit}
 					/>
-					{slugError && (
+					{commonFieldsError && (
 						<Box marginTop={1}>
-							<Text color={theme.error}>{slugError}</Text>
+							<Text color={theme.error}>{commonFieldsError}</Text>
 						</Box>
 					)}
 					<Box marginTop={1}>
@@ -721,7 +761,7 @@ export function ProviderSetupPage({
 						</Text>
 					</Box>
 
-					{showBuiltinList && (
+					{showModelList && (
 						<Box flexDirection="column" marginBottom={1}>
 							<Box marginBottom={1}>
 								<Text color={theme.label} bold>
@@ -733,7 +773,7 @@ export function ProviderSetupPage({
 							</Box>
 							<MultiSelect
 								options={modelOptions}
-								selected={workingSelectedModels.filter((id) => builtinModelIds.has(id))}
+								selected={workingSelectedModels.filter((id) => selectableModelIds.has(id))}
 								onChange={handleModelChange}
 								isFocused={effectiveModelFocusMode === 'list'}
 								onTab={() => setModelFocusMode('input')}
@@ -741,12 +781,12 @@ export function ProviderSetupPage({
 						</Box>
 					)}
 
-					<Box flexDirection="column" marginTop={showBuiltinList ? 1 : 0}>
+					<Box flexDirection="column" marginTop={showModelList ? 1 : 0}>
 						<Box marginBottom={1}>
 							<Text color={theme.label} bold>
 								Add Custom Model
 							</Text>
-							{showBuiltinList && effectiveModelFocusMode === 'input' && (
+							{showModelList && effectiveModelFocusMode === 'input' && (
 								<Text color={theme.muted}> (Tab to switch to list)</Text>
 							)}
 						</Box>
@@ -758,7 +798,7 @@ export function ProviderSetupPage({
 							hint="Press Enter to add"
 							isFocused={effectiveModelFocusMode === 'input'}
 							onSubmit={handleAddCustomModel}
-							onTab={showBuiltinList ? () => setModelFocusMode('list') : undefined}
+							onTab={showModelList ? () => setModelFocusMode('list') : undefined}
 						/>
 
 						{customModels.length > 0 && (

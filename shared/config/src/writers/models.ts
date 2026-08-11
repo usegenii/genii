@@ -24,7 +24,7 @@ export interface ModelConfigWrite {
  * @param models - Model configs keyed by name
  *
  * @example
- * await saveModelsConfig('/home/user/.config/genii', {
+ * await saveModelsConfig('/home/user/.local/share/genii', {
  *   'claude-opus': {
  *     provider: 'zai',
  *     modelId: 'claude-opus-4-20250514',

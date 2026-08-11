@@ -59,6 +59,54 @@ export function buildNonInteractivePreferences(
 	};
 }
 
+export interface NonInteractiveProviderSetupOptions {
+	configPath: string;
+	providerId: string;
+	apiKey: string;
+	modelIds: readonly string[];
+	logLevel?: PreferencesConfigWrite['logLevel'];
+}
+
+/**
+ * Persist the provider, models, credentials, and defaults used by non-interactive onboarding.
+ */
+export async function persistNonInteractiveProviderSetup({
+	configPath,
+	providerId,
+	apiKey,
+	modelIds,
+	logLevel,
+}: NonInteractiveProviderSetupOptions): Promise<void> {
+	const providerDef = getProvider(providerId);
+	if (!providerDef) {
+		throw new Error(`Unknown provider: ${providerId}`);
+	}
+	if (!providerDef.defaultBaseUrl) {
+		throw new Error(`Provider ${providerId} has no default base URL`);
+	}
+
+	const secretStore = await createSecretStore(configPath, 'genii');
+	const secretName = `${providerId}-api-key`;
+	const secretResult = await secretStore.set(secretName, apiKey);
+	if (!secretResult.success) {
+		throw new Error(`Failed to store API key: ${secretResult.error}`);
+	}
+
+	await saveProvidersConfig(configPath, {
+		[providerId]: {
+			type: providerDef.apiType,
+			baseUrl: providerDef.defaultBaseUrl,
+			credential: `secret:${secretName}`,
+		},
+	});
+
+	const modelsConfig = Object.fromEntries(
+		modelIds.map((modelId) => [modelId, { provider: providerId, modelId } satisfies ModelConfigWrite]),
+	);
+	await saveModelsConfig(configPath, modelsConfig);
+	await savePreferencesConfig(configPath, buildNonInteractivePreferences(providerId, modelIds, logLevel));
+}
+
 /**
  * Prompt the user for Y/N confirmation.
  */
@@ -85,7 +133,7 @@ export function registerOnboardCommand(program: Command): void {
 		.description('Copy template guidance files (SOUL.md, INSTRUCTIONS.md) to the guidance directory')
 		.option('-n, --non-interactive', 'Skip TUI wizard and use CLI flags')
 		.option('--accept-disclaimer', 'Accept disclaimer (required for non-interactive)')
-		.option('--provider <id>', 'Provider ID (e.g., "zai")')
+		.option('--provider <id>', 'Provider ID (e.g., "zai" or "google")')
 		.option('--api-key <key>', 'API key for provider')
 		.option('--models <list>', 'Comma-separated model IDs')
 		.option('--log-level <level>', 'Log level (debug, info, warn, error)')
@@ -129,61 +177,19 @@ export function registerOnboardCommand(program: Command): void {
 						process.exit(1);
 					}
 
-					// Derive config path from guidance path (remove /guidance suffix)
-					const configPath = status.guidancePath.replace(/\/guidance$/, '');
+					const configPath = status.dataPath;
 
-					// Get provider definition
-					const providerDef = getProvider(options.provider);
-					if (!providerDef) {
-						formatter.error(new Error(`Unknown provider: ${options.provider}`));
-						process.exit(1);
-					}
-
-					if (!providerDef.defaultBaseUrl) {
-						formatter.error(new Error(`Provider ${options.provider} has no default base URL`));
-						process.exit(1);
-					}
-
-					// Store API key in secret store
-					const secretStore = await createSecretStore(configPath, 'genii');
-					const secretName = `${options.provider}-api-key`;
-					const secretResult = await secretStore.set(secretName, options.apiKey);
-					if (!secretResult.success) {
-						formatter.error(new Error(`Failed to store API key: ${secretResult.error}`));
-						process.exit(1);
-					}
-					formatter.message('API key stored securely', 'success');
-
-					// Write provider config
-					await saveProvidersConfig(configPath, {
-						[options.provider]: {
-							type: providerDef.apiType,
-							baseUrl: providerDef.defaultBaseUrl,
-							credential: `secret:${secretName}`,
-						},
-					});
-					formatter.message(`Provider ${options.provider} configured`, 'success');
-
-					// Write models config
 					const modelIds = (options.models as string).split(',').map((s: string) => s.trim());
-					const modelsConfig = Object.fromEntries(
-						modelIds.map((modelId) => [
-							modelId,
-							{ provider: options.provider, modelId } satisfies ModelConfigWrite,
-						]),
-					);
-					await saveModelsConfig(configPath, modelsConfig);
-					formatter.message(`Models configured: ${modelIds.join(', ')}`, 'success');
-
-					// Write preferences config (defaultModels only written if none exist)
-					await savePreferencesConfig(
+					await persistNonInteractiveProviderSetup({
 						configPath,
-						buildNonInteractivePreferences(
-							options.provider as string,
-							modelIds,
-							options.logLevel as PreferencesConfigWrite['logLevel'],
-						),
-					);
+						providerId: options.provider as string,
+						apiKey: options.apiKey as string,
+						modelIds,
+						logLevel: options.logLevel as PreferencesConfigWrite['logLevel'],
+					});
+					formatter.message('API key stored securely', 'success');
+					formatter.message(`Provider ${options.provider} configured`, 'success');
+					formatter.message(`Models configured: ${modelIds.join(', ')}`, 'success');
 					formatter.message('Preferences configured', 'success');
 
 					// Handle Pulse config if enabled
@@ -281,7 +287,7 @@ export function registerOnboardCommand(program: Command): void {
 					// Interactive TUI mode (default)
 					const { waitUntilExit } = render(
 						React.createElement(OnboardingWizard, {
-							configPath: status.guidancePath,
+							configPath: status.dataPath,
 							onComplete: () => formatter.success({ message: 'Setup complete' }),
 							onCancel: () => formatter.message('Setup cancelled', 'info'),
 						}),

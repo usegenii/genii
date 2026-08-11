@@ -129,6 +129,57 @@ credential = "secret:openai-api-key"
 			const result = await loadProvidersConfig(emptyDir);
 			expect(result).toEqual({});
 		});
+
+		it('accepts Google providers and preserves opaque identifiers and direct credentials', async () => {
+			const providersDir = path.join(tempDir, 'providers-google');
+			await mkdir(providersDir, { recursive: true });
+
+			const tomlContent = `
+[google]
+type = "google"
+base-url = "https://generativelanguage.googleapis.com/v1beta"
+credential = "direct-test-key"
+
+["__proto__"]
+type = "openai"
+base-url = "https://api.example.com/v1"
+credential = "secret:prototype-api-key"
+experimental-option = true
+`;
+			await writeFile(path.join(providersDir, 'providers.toml'), tomlContent, 'utf-8');
+
+			const result = await loadProvidersConfig(providersDir);
+
+			expect(result.google).toMatchObject({
+				type: 'google',
+				baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+				credential: 'direct-test-key',
+			});
+			expect(Object.hasOwn(result, '__proto__')).toBe(true);
+			expect(Reflect.get(result, '__proto__')).toMatchObject({
+				type: 'openai',
+				baseUrl: 'https://api.example.com/v1',
+				credential: 'secret:prototype-api-key',
+				experimentalOption: true,
+			});
+		});
+
+		it('rejects unsupported provider API types with the provider identifier', async () => {
+			const providersDir = path.join(tempDir, 'providers-unsupported');
+			await mkdir(providersDir, { recursive: true });
+
+			const tomlContent = `
+[vertex]
+type = "google-vertex"
+base-url = "https://us-central1-aiplatform.googleapis.com"
+credential = "secret:vertex-api-key"
+`;
+			await writeFile(path.join(providersDir, 'providers.toml'), tomlContent, 'utf-8');
+
+			await expect(loadProvidersConfig(providersDir)).rejects.toThrow(
+				'Provider "vertex" has unsupported API type "google-vertex". Supported types: anthropic, openai, google',
+			);
+		});
 	});
 
 	describe('loadModelsConfig', () => {

@@ -83,6 +83,7 @@ export interface ConfigValidationResult {
 }
 
 export interface OnboardStatus {
+	dataPath: string;
 	guidancePath: string;
 	templates: string[];
 	existing: string[];

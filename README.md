@@ -6,28 +6,122 @@ An autonomous AI agent platform that runs in the background, maintaining persist
 
 - **Persistent Agents**: AI agents that maintain conversation history and context across sessions
 - **Multi-Channel Support**: Connect to Telegram, Discord, and other messaging platforms
-- **Configurable Models**: Support for Anthropic, OpenAI, and Google AI models
+- **Configurable Models**: Support for Anthropic, OpenAI-compatible, and Google Gemini models through the
+  Google Generative AI API
 - **Guidance System**: Customize agent personality and behavior through markdown files
 - **Background Daemon**: Runs quietly in the background, always available
 - **CLI Control**: Full control over agents, channels, and configuration via command line
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install and Build Dependencies
 
 ```bash
 pnpm install
+pnpm build
 ```
 
-### 2. Configure Providers and Models
+Choose one of the following provider setup paths. Each path ends with a command that spawns an agent using the
+configured model.
 
-Create the configuration directory:
+### 2A. Set Up Google Gemini Through Onboarding
+
+The built-in `google` provider uses the Google Generative AI API. Onboarding communicates with the daemon. In terminal
+1, from the repository root, start the daemon in the foreground and leave it running:
 
 ```bash
-mkdir -p ~/.config/genii/guidance
+(cd apps/daemon && pnpm tsx src/index.ts --log-level debug)
 ```
 
-Create `~/.config/genii/providers.toml`:
+In terminal 2, also from the repository root, run interactive setup:
+
+```bash
+(cd apps/cli && pnpm tsx bin/genii.ts onboard)
+```
+
+Choose **Built-in Providers**, then **Google Generative AI**, enter your API key, and select **Gemini 3.6 Flash**.
+
+For repeatable non-interactive setup, provide the API key through your environment and run:
+
+```bash
+export GOOGLE_API_KEY="<your-google-api-key>"
+(cd apps/cli && pnpm tsx bin/genii.ts onboard \
+  --non-interactive \
+  --accept-disclaimer \
+  --provider google \
+  --api-key "$GOOGLE_API_KEY" \
+  --models gemini-3.6-flash)
+```
+
+Both paths store the API key securely as `google-api-key`. On a fresh setup, they configure
+`google/gemini-3.6-flash` as a default model. The relevant generated entries under the Genii data directory are:
+
+`providers.toml`:
+
+```toml
+[google]
+type = "google"
+base-url = "https://generativelanguage.googleapis.com/v1beta"
+credential = "secret:google-api-key"
+```
+
+`models.toml`:
+
+```toml
+[gemini-3.6-flash]
+provider = "google"
+model-id = "gemini-3.6-flash"
+```
+
+`preferences.toml` includes:
+
+```toml
+[agents]
+default-models = ["google/gemini-3.6-flash"]
+```
+
+Google Generative AI models currently expose the `off` thinking level in Genii. For Gemini 3.6 Flash, `off` sends
+Gemini's `MINIMAL` thinking level and hides thought summaries, but does not fully disable internal thinking. Onboarding
+leaves `thinking-level` unset because `off` is the provider default. Onboarding also stores the credential and installs
+the guidance templates.
+
+Google-compatible custom endpoints are available under **Custom Provider** by selecting **Google Generative AI API**.
+Enter a base URL that includes the endpoint's API-version path; Genii passes that URL directly to the Google client.
+
+After onboarding, return to terminal 1, stop the daemon with Ctrl+C, and rerun the daemon command so it loads the new
+configuration:
+
+```bash
+(cd apps/daemon && pnpm tsx src/index.ts --log-level debug)
+```
+
+Leave the restarted daemon running. In terminal 2, spawn a Google-backed agent:
+
+```bash
+(cd apps/cli && pnpm tsx bin/genii.ts agent spawn --model google/gemini-3.6-flash "Hello, world!")
+```
+
+### 2B. Set Up Anthropic Manually on Linux or macOS
+
+#### Configure the Provider and Models
+
+Set `GENII_DATA_DIR` to the same platform data directory that Genii uses, then create its guidance directory.
+
+On Linux:
+
+```bash
+GENII_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/genii"
+mkdir -p "$GENII_DATA_DIR/guidance"
+```
+
+On macOS:
+
+```bash
+GENII_DATA_DIR="${HOME}/Library/Application Support/genii"
+mkdir -p "$GENII_DATA_DIR/guidance"
+```
+
+Create `$GENII_DATA_DIR/providers.toml`:
 
 ```toml
 [anthropic]
@@ -36,7 +130,7 @@ base-url = "https://api.anthropic.com"
 credential = "secret:anthropic-api-key"
 ```
 
-Create `~/.config/genii/models.toml`:
+Create `$GENII_DATA_DIR/models.toml`:
 
 ```toml
 [sonnet]
@@ -50,7 +144,7 @@ model-id = "claude-opus-4-5-20251101"
 thinking-level = "medium"
 ```
 
-### 3. Store Your API Key
+#### Store Your API Key
 
 On macOS, store your API key in the system keychain:
 
@@ -89,34 +183,36 @@ chmod 600 "$GENII_DATA_DIR/secrets.json"
 }
 ```
 
-### 4. Create Minimal Guidance
+#### Create Minimal Guidance
 
-Create `~/.config/genii/guidance/SOUL.md`:
+Create `$GENII_DATA_DIR/guidance/SOUL.md`:
 
 ```markdown
 You are a helpful assistant.
 ```
 
-### 5. Start the Daemon
+#### Start the Daemon
+
+In terminal 1, from the repository root, start the daemon and leave it running:
 
 ```bash
-# Start in foreground for debugging
-cd apps/daemon && pnpm tsx src/index.ts --log-level debug
-
-# Or start via CLI (runs in background)
-cd apps/cli && pnpm tsx bin/genii.ts daemon start
+(cd apps/daemon && pnpm tsx src/index.ts --log-level debug)
 ```
 
-### 6. Spawn an Agent
+#### Spawn an Agent
+
+In terminal 2, from the repository root, spawn an Anthropic-backed agent:
 
 ```bash
-cd apps/cli && pnpm tsx bin/genii.ts agent spawn --model anthropic/sonnet "Hello, world!"
+(cd apps/cli && pnpm tsx bin/genii.ts agent spawn --model anthropic/sonnet "Hello, world!")
 ```
 
-### 7. List Agents
+### 3. List Agents
+
+After completing either provider setup path, list the running agents:
 
 ```bash
-cd apps/cli && pnpm tsx bin/genii.ts agent list
+(cd apps/cli && pnpm tsx bin/genii.ts agent list)
 ```
 
 ---
@@ -143,12 +239,15 @@ genii/
 ### Model Identifiers
 
 Models are referenced using the format `provider/model-name`. For example:
+
 - `anthropic/sonnet` - References the `sonnet` model configured under the `anthropic` provider
 - `anthropic/opus` - References the `opus` model configured under the `anthropic` provider
+- `google/gemini-3.6-flash` - References the `gemini-3.6-flash` model configured under the `google` provider
 
 ### Configuration Files
 
-All configuration files are stored in `~/.config/genii/` (Linux/macOS) or `%APPDATA%/genii/` (Windows).
+Configuration and runtime data share one Genii data directory. The defaults are `$XDG_DATA_HOME/genii` when set or
+`~/.local/share/genii` on Linux/Unix, `~/Library/Application Support/genii` on macOS, and `%APPDATA%/genii` on Windows.
 
 | File | Description |
 |------|-------------|
@@ -172,7 +271,8 @@ For Anthropic models, you can configure the thinking level:
 - `medium` - Medium thinking budget (default for Anthropic)
 - `high` - High thinking budget
 
-OpenAI and Google models only support `off`.
+OpenAI only supports `off`. Google Generative AI also exposes only `off` at the Genii capability boundary; for
+Gemini 3.6 Flash, it has the minimum-thinking semantics described in the Google onboarding section above.
 
 ## Prerequisites
 

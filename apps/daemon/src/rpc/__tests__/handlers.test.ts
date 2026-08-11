@@ -139,6 +139,7 @@ function createMockContext(overrides?: Partial<RpcHandlerContext>): RpcHandlerCo
 		config: {
 			socketPath: '/tmp/test.sock',
 			storagePath: '/tmp/test-storage',
+			guidancePath: '/test/guidance',
 			logLevel: 'info',
 			startTime: Date.now(),
 			version: '1.0.0',
@@ -170,6 +171,25 @@ function getHandler(
 }
 
 describe('RPC Handlers', () => {
+	describe('handleOnboardStatus', () => {
+		it('returns the authoritative data path independently of a custom Windows guidance path', async () => {
+			const context = createMockContext({
+				config: {
+					...createMockContext().config,
+					storagePath: 'C:\\Users\\genii\\AppData\\Local\\genii',
+					guidancePath: 'D:\\shared\\custom-guidance',
+				},
+			});
+			const handler = getHandler(createHandlers(context), 'onboard.status');
+
+			await expect(handler({}, context)).resolves.toMatchObject({
+				dataPath: 'C:\\Users\\genii\\AppData\\Local\\genii',
+				guidancePath: 'D:\\shared\\custom-guidance',
+				templates: ['SOUL.md', 'INSTRUCTIONS.md', 'PULSE.md'],
+			});
+		});
+	});
+
 	describe('handleAgentSpawn', () => {
 		it('should pass the exact toolRegistry from context to coordinator.spawn()', async () => {
 			const mockToolRegistry = createMockToolRegistry();

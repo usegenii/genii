@@ -1,3 +1,5 @@
+import type { ProviderApiType } from '../types/provider.js';
+
 /**
  * Field types for config-driven forms.
  */
@@ -40,7 +42,7 @@ export interface AuthMethod {
 export interface ProviderDefinition {
 	id: string;
 	name: string;
-	apiType: 'anthropic' | 'openai';
+	apiType: ProviderApiType;
 	defaultBaseUrl?: string;
 	commonFields?: SetupField[]; // Fields shown before auth method selection
 	authMethods: AuthMethod[];

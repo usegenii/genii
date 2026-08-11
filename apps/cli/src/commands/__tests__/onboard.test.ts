@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Note: Since the onboard command integrates with the daemon RPC,
 // we'll test the individual components that make up the non-interactive mode
 
+import { loadConfig } from '@genii/config/config';
 import { loadPreferencesConfig } from '@genii/config/loaders/preferences';
 import { BUILTIN_PROVIDERS, getProvider } from '@genii/config/providers/definitions';
 import { FileSecretStore } from '@genii/config/secrets/file';
@@ -18,7 +19,7 @@ import { savePreferencesConfig } from '@genii/config/writers/preferences';
 import { saveProvidersConfig } from '@genii/config/writers/providers';
 import { createShellTool } from '@genii/orchestrator/tools/shell/tool';
 import type { ToolContext } from '@genii/orchestrator/tools/types';
-import { buildNonInteractivePreferences } from '../onboard';
+import { buildNonInteractivePreferences, persistNonInteractiveProviderSetup } from '../onboard';
 
 describe('Onboard Command Integration', () => {
 	let testDir: string;
@@ -145,12 +146,45 @@ describe('Onboard Command Integration', () => {
 			}
 		});
 
+		it('persists the supported Google setup through the command write path', async () => {
+			await persistNonInteractiveProviderSetup({
+				configPath: testDir,
+				providerId: 'google',
+				apiKey: 'google-test-api-key',
+				modelIds: ['gemini-3.6-flash'],
+			});
+
+			const secretStore = new FileSecretStore(join(testDir, 'secrets.json'));
+			const config = await loadConfig({ basePath: testDir });
+			expect(config.getProvider('google')).toEqual({
+				type: 'google',
+				baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+				credential: 'secret:google-api-key',
+			});
+			expect(config.getModel('gemini-3.6-flash')).toEqual({
+				provider: 'google',
+				modelId: 'gemini-3.6-flash',
+			});
+			expect(config.getPreferences().agents.defaultModels).toEqual(['google/gemini-3.6-flash']);
+			await expect(secretStore.get('google-api-key')).resolves.toEqual({
+				success: true,
+				value: 'google-test-api-key',
+			});
+		});
+
 		it('should include all built-in providers in definitions', () => {
 			expect(BUILTIN_PROVIDERS.length).toBeGreaterThan(0);
 
 			const zaiProvider = getProvider('zai');
 			expect(zaiProvider).toBeDefined();
 			expect(zaiProvider?.apiType).toBe('openai');
+
+			const googleProvider = getProvider('google');
+			expect(googleProvider).toMatchObject({
+				name: 'Google Generative AI',
+				apiType: 'google',
+				defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+			});
 		});
 	});
 });

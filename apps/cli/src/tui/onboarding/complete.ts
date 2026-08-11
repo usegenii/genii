@@ -12,7 +12,7 @@ import { createSecretStore } from '@genii/config/secrets/composite';
 import { saveChannelsConfig } from '@genii/config/writers/channels';
 import { type ModelConfigWrite, writeModelsConfig } from '@genii/config/writers/models';
 import { savePreferencesConfig } from '@genii/config/writers/preferences';
-import { saveProvidersConfig } from '@genii/config/writers/providers';
+import { type ProviderConfigWrite, saveProvidersConfig } from '@genii/config/writers/providers';
 import { writeTomlFile } from '@genii/config/writers/toml';
 import { createDaemonClient } from '../../client';
 import type { OnboardingState } from './types';
@@ -57,22 +57,15 @@ function intervalToCron(interval: string): string {
  * Complete the onboarding wizard by writing all configs and storing secrets.
  *
  * @param state - The final wizard state
- * @param guidancePath - Path to the guidance directory (from daemon status)
+ * @param configPath - Base path where configuration and secrets are stored
  * @returns Result indicating success or failure
  */
-export async function completeOnboarding(state: OnboardingState, guidancePath: string): Promise<CompleteResult> {
-	// Derive config path from guidance path (remove /guidance suffix)
-	const configPath = guidancePath.replace(/\/guidance$/, '');
-
+export async function completeOnboarding(state: OnboardingState, configPath: string): Promise<CompleteResult> {
 	// 1. Create secret store
 	const secretStore = await createSecretStore(configPath, 'genii');
 
 	// 2. Process all providers (skip those marked for removal)
-	const providerConfigs = createIdentifierRecord<{
-		type: 'anthropic' | 'openai';
-		baseUrl: string;
-		credential: string;
-	}>();
+	const providerConfigs = createIdentifierRecord<ProviderConfigWrite>();
 	const allSelectedModels: string[] = [];
 	const modelsConfig = createIdentifierRecord<ModelConfigWrite>();
 
@@ -91,6 +84,10 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		const baseUrl = isCustomProvider ? provider.custom?.baseUrl : providerDef.defaultBaseUrl;
 		const apiType = isCustomProvider ? (provider.custom?.apiType ?? 'anthropic') : providerDef.apiType;
 		const keepExistingApiKey = provider.keepExistingApiKey ?? false;
+		const existingProviderId = provider.existingProviderId ?? providerId;
+		const existingProvider = state.existingConfig?.providers.find(
+			(candidate) => candidate.providerId === existingProviderId,
+		);
 
 		if (!keepExistingApiKey && !apiKey) {
 			return { success: false, error: `API key is required for provider ${providerId}` };
@@ -114,14 +111,18 @@ export async function completeOnboarding(state: OnboardingState, guidancePath: s
 		providerConfigs[providerId] = {
 			type: apiType,
 			baseUrl,
-			credential: `secret:${secretName}`,
+			credential:
+				keepExistingApiKey && existingProvider ? existingProvider.config.credential : `secret:${secretName}`,
 		};
 
 		// Collect models for this provider
 		for (const modelId of provider.selectedModels) {
+			const existingModel = state.existingConfig?.models.find(
+				(candidate) => candidate.providerId === existingProviderId && candidate.modelId === modelId,
+			);
 			modelsConfig[modelId] = {
 				provider: providerId,
-				modelId,
+				modelId: existingModel?.config.modelId ?? modelId,
 			};
 			allSelectedModels.push(`${providerId}/${modelId}`);
 		}

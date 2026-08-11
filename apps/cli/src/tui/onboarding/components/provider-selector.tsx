@@ -31,35 +31,36 @@ export interface ProviderSelectorProps {
  * Build tree nodes from provider definitions.
  * Includes auth method selection for providers with multiple auth methods.
  */
-function buildProviderTree(existingConfig?: ExistingConfig): TreeNode[] {
-	// Create a set of configured provider IDs for quick lookup
-	const configuredProviderIds = new Set(existingConfig?.providers.map((p) => p.providerId) ?? []);
-	const builtinIds = new Set(BUILTIN_PROVIDERS.map((p) => p.id));
+export function buildProviderTree(existingConfig?: ExistingConfig): TreeNode[] {
+	const configuredBuiltinIds = new Set(
+		existingConfig?.providers.filter((provider) => provider.isBuiltin).map((provider) => provider.providerId) ?? [],
+	);
+	const configuredCustomProviders = existingConfig?.providers.filter((provider) => !provider.isBuiltin) ?? [];
+	const configuredCustomIds = new Set(configuredCustomProviders.map((provider) => provider.providerId));
 
-	// Find configured custom providers (non-builtin)
-	const configuredCustomProviders = existingConfig?.providers.filter((p) => !builtinIds.has(p.providerId)) ?? [];
+	const builtinNodes: TreeNode[] = BUILTIN_PROVIDERS.filter((provider) => !configuredCustomIds.has(provider.id)).map(
+		(p: ProviderDefinition) => {
+			const isConfigured = configuredBuiltinIds.has(p.id);
+			const label = isConfigured ? `${p.name} [configured]` : p.name;
 
-	const builtinNodes: TreeNode[] = BUILTIN_PROVIDERS.map((p: ProviderDefinition) => {
-		const isConfigured = configuredProviderIds.has(p.id);
-		const label = isConfigured ? `${p.name} [configured]` : p.name;
-
-		// If provider has multiple auth methods, add them as children
-		if (p.authMethods.length > 1) {
+			// If provider has multiple auth methods, add them as children
+			if (p.authMethods.length > 1) {
+				return {
+					id: p.id,
+					label,
+					children: p.authMethods.map((auth) => ({
+						id: auth.type,
+						label: auth.name,
+					})),
+				};
+			}
+			// Single auth method - no children needed
 			return {
 				id: p.id,
 				label,
-				children: p.authMethods.map((auth) => ({
-					id: auth.type,
-					label: auth.name,
-				})),
 			};
-		}
-		// Single auth method - no children needed
-		return {
-			id: p.id,
-			label,
-		};
-	});
+		},
+	);
 
 	// Build custom provider node
 	const customNode: TreeNode =
@@ -104,6 +105,19 @@ function buildProviderTree(existingConfig?: ExistingConfig): TreeNode[] {
 }
 
 /**
+ * Find an existing provider with the requested built-in classification.
+ */
+export function findExistingProviderInfo(
+	existingConfig: ExistingConfig | undefined,
+	providerId: string,
+	isBuiltin: boolean,
+): ExistingProviderInfo | undefined {
+	return existingConfig?.providers.find(
+		(provider) => provider.providerId === providerId && provider.isBuiltin === isBuiltin,
+	);
+}
+
+/**
  * Provider selector with tree navigation.
  * Handles provider selection and auth method selection.
  */
@@ -122,11 +136,6 @@ export function ProviderSelector({
 	};
 
 	const handlePathConfirm = (path: string[]) => {
-		// Helper to find existing provider info
-		const findExistingInfo = (providerId: string): ExistingProviderInfo | undefined => {
-			return existingConfig?.providers.find((p) => p.providerId === providerId);
-		};
-
 		// Handle custom provider selection (no parent category)
 		if (path.length === 1 && path[0] === 'custom') {
 			const authMethod = CUSTOM_PROVIDER_DEFINITION.authMethods[0];
@@ -149,7 +158,7 @@ export function ProviderSelector({
 		if (path.length === 2 && path[0] === 'configured-custom') {
 			const providerId = path[1];
 			if (!providerId) return;
-			const existingInfo = findExistingInfo(providerId);
+			const existingInfo = findExistingProviderInfo(existingConfig, providerId, false);
 			if (existingInfo) {
 				// Use custom provider definition for configured custom providers
 				const authMethod = CUSTOM_PROVIDER_DEFINITION.authMethods[0];
@@ -168,7 +177,7 @@ export function ProviderSelector({
 				if (provider.authMethods.length === 1) {
 					const authMethod = provider.authMethods[0];
 					if (authMethod) {
-						const existingInfo = findExistingInfo(provider.id);
+						const existingInfo = findExistingProviderInfo(existingConfig, provider.id, true);
 						onSelect(provider, authMethod, existingInfo);
 					}
 				}
@@ -183,7 +192,7 @@ export function ProviderSelector({
 			if (provider) {
 				const authMethod = provider.authMethods.find((a) => a.type === path[2]);
 				if (authMethod) {
-					const existingInfo = findExistingInfo(provider.id);
+					const existingInfo = findExistingProviderInfo(existingConfig, provider.id, true);
 					onSelect(provider, authMethod, existingInfo);
 				}
 			}

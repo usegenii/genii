@@ -19,7 +19,7 @@ interface PingServer {
 }
 
 interface ClientProbeInput {
-	mode: 'ping' | 'resolve';
+	mode: 'onboard-status' | 'ping' | 'resolve';
 	socketPath?: string;
 }
 
@@ -48,7 +48,7 @@ function getDisposableSocketPath(directory: string, name: string): string {
 	return join(directory, `${name}.sock`);
 }
 
-async function startPingServer(socketPath: string): Promise<PingServer> {
+async function startPingServer(socketPath: string, result: unknown = { pong: true }): Promise<PingServer> {
 	const requests: RpcRequest[] = [];
 	const server = createServer((socket) => {
 		let buffer = '';
@@ -64,7 +64,7 @@ async function startPingServer(socketPath: string): Promise<PingServer> {
 
 				const request = JSON.parse(line) as RpcRequest;
 				requests.push(request);
-				socket.write(`${JSON.stringify({ id: request.id, result: { pong: true } })}\n`);
+				socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
 			}
 		});
 	});
@@ -168,5 +168,44 @@ describe('SocketDaemonClient socket path resolution', () => {
 		const pingServer = await startPingServer(defaultSocketPath);
 		servers.push(pingServer);
 		await expectPing({ mode: 'ping' }, environment, pingServer);
+	});
+
+	it('returns the authoritative onboarding data path from the daemon response', async () => {
+		const socketPath = getDisposableSocketPath(testDirectory, 'onboard-status');
+		const environment = createClientEnvironment(testDirectory);
+		const status = {
+			dataPath: 'C:\\Users\\genii\\AppData\\Local\\genii',
+			guidancePath: 'D:\\shared\\custom-guidance',
+			templates: ['SOUL.md', 'INSTRUCTIONS.md', 'PULSE.md'],
+			existing: [],
+		};
+		const server = await startPingServer(socketPath, status);
+		servers.push(server);
+
+		const output = await runClientProbe({ mode: 'onboard-status', socketPath }, environment);
+
+		expect(JSON.parse(output)).toEqual(status);
+		expect(server.requests).toHaveLength(1);
+		expect(server.requests[0]?.method).toBe('onboard.status');
+	});
+
+	it('rejects onboarding status from a daemon that predates the data path response', async () => {
+		const socketPath = getDisposableSocketPath(testDirectory, 'old-onboard-status');
+		const environment = createClientEnvironment(testDirectory);
+		const priorStatus = {
+			guidancePath: '/var/lib/genii/guidance',
+			templates: ['SOUL.md', 'INSTRUCTIONS.md', 'PULSE.md'],
+			existing: [],
+		};
+		const server = await startPingServer(socketPath, priorStatus);
+		servers.push(server);
+
+		await expect(runClientProbe({ mode: 'onboard-status', socketPath }, environment)).rejects.toMatchObject({
+			stderr: expect.stringContaining(
+				'The running Genii daemon returned an incompatible onboarding status without a data path. Upgrade Genii if needed, restart the daemon, then run onboarding again.',
+			),
+		});
+		expect(server.requests).toHaveLength(1);
+		expect(server.requests[0]?.method).toBe('onboard.status');
 	});
 });

@@ -6,7 +6,7 @@
 import type { ChannelConfig } from '@genii/config/types/channel';
 import type { ModelConfig } from '@genii/config/types/model';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '@genii/config/types/preferences';
-import type { ProviderConfig } from '@genii/config/types/provider';
+import type { ProviderApiType, ProviderConfig } from '@genii/config/types/provider';
 
 /**
  * Page identifiers for the wizard.
@@ -20,6 +20,7 @@ export interface ExistingProviderInfo {
 	providerId: string;
 	config: ProviderConfig;
 	isBuiltin: boolean;
+	/** Whether the existing credential is available to retain without displaying its value. */
 	hasStoredApiKey: boolean;
 }
 
@@ -72,7 +73,7 @@ export interface ProviderState {
 	builtinId?: string;
 	apiKey?: string;
 	custom?: {
-		apiType: 'anthropic' | 'openai';
+		apiType: ProviderApiType;
 		baseUrl: string;
 		apiKey?: string;
 	};
@@ -93,7 +94,7 @@ export interface ProviderInstanceState {
 	builtinId?: string;
 	apiKey?: string;
 	custom?: {
-		apiType: 'anthropic' | 'openai';
+		apiType: ProviderApiType;
 		baseUrl: string;
 		apiKey?: string;
 	};

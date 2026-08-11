@@ -52,7 +52,7 @@ const mockSavePreferencesConfig = vi.mocked(savePreferencesConfig);
 
 describe('completeOnboarding', () => {
 	it('should persist the default shell timeout in milliseconds', async () => {
-		const result = await completeOnboarding(DEFAULT_STATE, '/tmp/fake/guidance');
+		const result = await completeOnboarding(DEFAULT_STATE, '/tmp/fake');
 		expect(result.success).toBe(true);
 
 		expect(mockSavePreferencesConfig).toHaveBeenCalledWith(
@@ -78,7 +78,7 @@ describe('completeOnboarding', () => {
 			],
 		};
 
-		const result = await completeOnboarding(state, '/tmp/fake/guidance');
+		const result = await completeOnboarding(state, '/tmp/fake');
 		expect(result.success).toBe(true);
 
 		expect(mockSavePreferencesConfig).toHaveBeenCalledWith(
@@ -114,7 +114,7 @@ describe('completeOnboarding', () => {
 			],
 		};
 
-		const result = await completeOnboarding(state, '/tmp/fake/guidance');
+		const result = await completeOnboarding(state, '/tmp/fake');
 		expect(result.success).toBe(true);
 
 		expect(mockSavePreferencesConfig).toHaveBeenCalledWith(

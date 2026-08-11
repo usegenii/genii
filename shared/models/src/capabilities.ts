@@ -3,6 +3,7 @@
  */
 
 import type { ThinkingLevel } from '@genii/config/types/model';
+import { isProviderApiType } from '@genii/config/types/provider';
 import type { ProviderType } from './types';
 
 /**
@@ -103,5 +104,5 @@ export function resolveThinkingLevel(
  * @returns true if the string is a valid provider type
  */
 export function isValidProviderType(type: string): type is ProviderType {
-	return type === 'anthropic' || type === 'openai' || type === 'google';
+	return isProviderApiType(type);
 }

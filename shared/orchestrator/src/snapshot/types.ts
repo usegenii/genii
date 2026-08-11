@@ -22,6 +22,7 @@ export interface CheckpointMessage {
 	toolName?: string;
 	isError?: boolean;
 	/** For assistant messages - provider metadata */
+	api?: string;
 	provider?: string;
 	model?: string;
 }
@@ -30,10 +31,10 @@ export interface CheckpointMessage {
  * Content types for checkpoint messages.
  */
 export type CheckpointContent =
-	| { type: 'text'; text: string }
+	| { type: 'text'; text: string; textSignature?: string }
 	| { type: 'image'; mediaType: string; data: string }
-	| { type: 'thinking'; text: string }
-	| { type: 'tool_use'; id: string; name: string; input: unknown };
+	| { type: 'thinking'; text: string; thinkingSignature?: string }
+	| { type: 'tool_use'; id: string; name: string; input: unknown; thoughtSignature?: string };
 
 /**
  * Adapter-specific configuration returned by instance checkpoint.

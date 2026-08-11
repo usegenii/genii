@@ -13,7 +13,7 @@ export interface ApiKeyFieldProps {
 	value: string;
 	/** Change handler for new key input */
 	onChange: (value: string) => void;
-	/** Whether the secret store has an existing key */
+	/** Whether an existing key can be retained without displaying its value */
 	hasExistingKey: boolean;
 	/** Whether to keep the existing key */
 	keepExisting: boolean;
@@ -28,7 +28,7 @@ export interface ApiKeyFieldProps {
 /**
  * API key field that shows toggle for keeping existing key or entering new one.
  *
- * When an existing key is stored:
+ * When an existing key can be retained:
  * - Shows a toggle checkbox "[x] Keep existing key" with masked display
  * - Space toggles the checkbox
  * - When unchecked, shows input field for new key
