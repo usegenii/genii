@@ -346,15 +346,22 @@ describe('daemon stop lifecycle over a real RPC socket', () => {
 	it('allows a second forced request to escalate an in-progress graceful stop', async () => {
 		const coordinator = new LifecycleCoordinator(async (options) => waitForAbort(options.signal));
 		const { socketPath } = await startInProcessDaemon('concurrent-escalation', coordinator, 100);
-		const gracefulCli = startCli(socketPath, ['daemon', 'stop', '--timeout', '1000']);
+		// Keep the graceful deadline well above CLI process startup so this
+		// assertion cannot pass via timeout escalation on a slow runner.
+		const gracefulCli = startCli(socketPath, ['daemon', 'stop', '--timeout', '30000']);
 
 		await waitFor(() => coordinator.shutdownCalls.length === 1, 'graceful coordinator shutdown to begin');
 		expect(coordinator.shutdownCalls[0]?.signal?.aborted).toBe(false);
 
 		const forcedCli = startCli(socketPath, ['daemon', 'stop', '--force', '--timeout', '1']);
+		await waitFor(
+			() => coordinator.shutdownCalls[0]?.signal?.aborted === true,
+			'forced request to escalate the in-progress graceful stop',
+			10_000,
+		);
 		const [gracefulExit, forcedExit] = await Promise.all([
-			withDeadline(gracefulCli.exit, 'graceful CLI escalation response'),
-			withDeadline(forcedCli.exit, 'forced CLI escalation response'),
+			withDeadline(gracefulCli.exit, 'graceful CLI escalation response', 10_000),
+			withDeadline(forcedCli.exit, 'forced CLI escalation response', 10_000),
 		]);
 		const gracefulEnvelope = jsonEnvelope<StopResult>(gracefulCli.stdout());
 		const forcedEnvelope = jsonEnvelope<StopResult>(forcedCli.stdout());
