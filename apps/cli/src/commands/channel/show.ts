@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
+import { handleError } from '../../utils/errors';
 
 /**
  * Status colors for channel status.
@@ -73,7 +74,7 @@ export function showCommand(channel: Command): void {
 		.description('Show channel details')
 		.option('--include-metrics', 'Include connection metrics')
 		.option('--include-history', 'Include recent message history')
-		.action(async (channelId: string, options, cmd) => {
+		.action(async (channelId: string, _options, cmd) => {
 			const globalOpts = cmd.optsWithGlobals();
 			const format = getOutputFormat(globalOpts);
 			const formatter = getFormatter(format);
@@ -85,57 +86,37 @@ export function showCommand(channel: Command): void {
 
 				const channelDetails = await client.getChannel(channelId);
 
-				// Sanitize config to hide secrets
-				const sanitizedConfig = sanitizeConfig(channelDetails.config);
+				const sanitizedConfig = channelDetails.config ? sanitizeConfig(channelDetails.config) : undefined;
+				const outputDetails =
+					sanitizedConfig === undefined ? channelDetails : { ...channelDetails, config: sanitizedConfig };
 
 				if (format === 'json') {
-					// For JSON output, return the full object with sanitized config
-					formatter.success({
-						...channelDetails,
-						config: sanitizedConfig,
-					});
+					formatter.success(outputDetails);
 				} else if (format === 'quiet') {
-					// For quiet mode, just output the ID
 					formatter.raw(channelDetails.id);
 				} else {
-					// Human-readable format
 					const pairs: Array<[string, unknown]> = [
 						['Channel ID', channelDetails.id],
 						['Adapter', channelDetails.type],
 						['Status', formatStatus(channelDetails.status)],
-						['Bound Conversations', channelDetails.conversationCount],
 					];
 
-					if (channelDetails.lastMessageAt) {
-						pairs.push(['Last Message', channelDetails.lastMessageAt]);
+					if (channelDetails.registeredAt) {
+						pairs.push(['Registered At', channelDetails.registeredAt]);
 					}
 
 					formatter.keyValue(pairs);
 
-					// Show configuration
-					if (Object.keys(sanitizedConfig).length > 0) {
+					if (sanitizedConfig && Object.keys(sanitizedConfig).length > 0) {
 						console.log('');
 						console.log(chalk.bold('Configuration:'));
 						console.log(formatValue(sanitizedConfig));
 					}
-
-					// Show metadata if present
-					if (channelDetails.metadata && Object.keys(channelDetails.metadata).length > 0) {
-						console.log('');
-						console.log(chalk.bold('Metadata:'));
-						console.log(formatValue(channelDetails.metadata));
-					}
-
-					// Show metrics if requested and available
-					if (options.includeMetrics && 'metrics' in channelDetails) {
-						console.log('');
-						console.log(chalk.bold('Metrics:'));
-						console.log(formatValue((channelDetails as Record<string, unknown>).metrics));
-					}
 				}
 			} catch (error) {
+				const { exitCode } = handleError(error);
 				formatter.error(error instanceof Error ? error : new Error(String(error)));
-				process.exitCode = 1;
+				process.exitCode = exitCode;
 			} finally {
 				await client.disconnect();
 			}

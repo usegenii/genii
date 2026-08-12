@@ -238,7 +238,7 @@ export interface RpcMethods {
 	'agent.listCheckpoints': Record<string, never>;
 	'channel.list': Record<string, never>;
 	'channel.get': { id: ChannelId };
-	'channel.connect': { type: string; config: Record<string, unknown> };
+	'channel.connect': { id: ChannelId };
 	'channel.disconnect': { id: ChannelId };
 	'channel.reconnect': { id: ChannelId };
 	'conversation.list': { filter?: ConversationFilter };

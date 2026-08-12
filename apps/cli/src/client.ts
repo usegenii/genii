@@ -7,6 +7,7 @@
 import type * as net from 'node:net';
 import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
+import { NotFoundError } from './utils/errors';
 
 // =============================================================================
 // Transport Types (copied from daemon for CLI independence)
@@ -69,24 +70,11 @@ export type AgentSnapshot = RpcMethodResults['agent.snapshot'];
  */
 export type SpawnAgentOptions = RpcMethods['agent.spawn'];
 
-/**
- * Channel summary for listing.
- */
-export interface ChannelSummary {
-	id: string;
-	type: string;
-	status: 'connected' | 'disconnected' | 'error';
-	conversationCount: number;
-	lastMessageAt?: string;
-}
+/** Channel summary returned by the RPC boundary. */
+export type ChannelSummary = RpcMethodResults['channel.list'][number];
 
-/**
- * Channel details.
- */
-export interface ChannelDetails extends ChannelSummary {
-	config: Record<string, unknown>;
-	metadata: Record<string, unknown>;
-}
+/** Existing channel details returned by the RPC boundary. */
+export type ChannelDetails = NonNullable<RpcMethodResults['channel.get']>;
 
 /**
  * Filter for listing conversations.
@@ -301,6 +289,13 @@ export class RpcResponseError extends Error {
 	}
 }
 
+function rethrowChannelNotFound(error: unknown, id: string): never {
+	if (error instanceof RpcResponseError && error.message === `Channel not found: ${id}`) {
+		throw new NotFoundError('Channel', id);
+	}
+	throw error;
+}
+
 // =============================================================================
 // DaemonClient Interface
 // =============================================================================
@@ -339,9 +334,9 @@ export interface DaemonClient {
 	// Channel methods
 	listChannels(): Promise<ChannelSummary[]>;
 	getChannel(id: string): Promise<ChannelDetails>;
-	connectChannel(id: string): Promise<void>;
-	disconnectChannel(id: string): Promise<void>;
-	reconnectChannel(id: string): Promise<void>;
+	connectChannel(id: string): Promise<RpcMethodResults['channel.connect']>;
+	disconnectChannel(id: string): Promise<RpcMethodResults['channel.disconnect']>;
+	reconnectChannel(id: string): Promise<RpcMethodResults['channel.reconnect']>;
 
 	// Conversation methods
 	listConversations(filter?: ConversationFilter): Promise<ConversationSummary[]>;
@@ -620,19 +615,35 @@ class SocketDaemonClient implements DaemonClient {
 	}
 
 	async getChannel(id: string): Promise<ChannelDetails> {
-		return this._request('channel.get', { id });
+		const channel = await this._request<RpcMethodResults['channel.get']>('channel.get', { id });
+		if (channel === null) {
+			throw new NotFoundError('Channel', id);
+		}
+		return channel;
 	}
 
-	async connectChannel(id: string): Promise<void> {
-		return this._request('channel.connect', { id });
+	async connectChannel(id: string): Promise<RpcMethodResults['channel.connect']> {
+		try {
+			return await this._request<RpcMethodResults['channel.connect']>('channel.connect', { id });
+		} catch (error) {
+			rethrowChannelNotFound(error, id);
+		}
 	}
 
-	async disconnectChannel(id: string): Promise<void> {
-		return this._request('channel.disconnect', { id });
+	async disconnectChannel(id: string): Promise<RpcMethodResults['channel.disconnect']> {
+		try {
+			return await this._request<RpcMethodResults['channel.disconnect']>('channel.disconnect', { id });
+		} catch (error) {
+			rethrowChannelNotFound(error, id);
+		}
 	}
 
-	async reconnectChannel(id: string): Promise<void> {
-		return this._request('channel.reconnect', { id });
+	async reconnectChannel(id: string): Promise<RpcMethodResults['channel.reconnect']> {
+		try {
+			return await this._request<RpcMethodResults['channel.reconnect']>('channel.reconnect', { id });
+		} catch (error) {
+			rethrowChannelNotFound(error, id);
+		}
 	}
 
 	// =========================================================================
