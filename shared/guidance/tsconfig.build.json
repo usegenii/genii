@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"include": ["templates/**/*.ts"],
+	"exclude": ["node_modules", "dist"],
+	"compilerOptions": {
+		"rootDir": "./templates",
+		"outDir": "./dist",
+		"emitDeclarationOnly": true,
+		"noEmit": false,
+		"declaration": true,
+		"declarationMap": true
+	}
+}

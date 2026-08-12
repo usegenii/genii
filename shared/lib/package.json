@@ -19,7 +19,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsup",
+		"build": "tsup && tsc --emitDeclarationOnly -p tsconfig.build.json",
 		"dev": "tsup --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
@@ -39,7 +39,8 @@
 		"@genii/orchestrator": "workspace:*"
 	},
 	"devDependencies": {
+		"@types/node": "24.13.3",
 		"tsup": "8.5.1",
-		"typescript": "5.9.3"
+		"typescript": "7.0.2"
 	}
 }
