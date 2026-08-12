@@ -35,7 +35,7 @@ import { resolveDefaultModel } from '../models/resolve';
 import { executeOnboard, getOnboardStatus } from '../onboard';
 import type { SchedulerLifecycle } from '../scheduler/types';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
-import { InvalidParamsError } from '../transport/errors';
+import { ResourceNotFoundError } from '../transport/errors';
 import type { TransportConnection } from '../transport/types';
 import type { SubscriptionManager } from './subscriptions';
 
@@ -496,10 +496,22 @@ async function handleChannelList(context: RpcHandlerContext): Promise<ChannelSum
 function requireRegisteredChannel(channelRegistry: ChannelRegistry, channelId: RpcMethods['channel.get']['id']) {
 	const channel = channelRegistry.get(channelId);
 	if (!channel) {
-		throw new InvalidParamsError(`Channel not found: ${channelId}`);
+		throw new ResourceNotFoundError('Channel', channelId);
 	}
 
 	return channel;
+}
+
+function canConnectRegisteredChannel(status: ChannelDetails['status']): boolean {
+	switch (status) {
+		case 'disconnected':
+		case 'error':
+			return true;
+		case 'connected':
+		case 'connecting':
+		case 'reconnecting':
+			return false;
+	}
 }
 
 async function handleChannelGet(
@@ -528,8 +540,8 @@ async function handleChannelConnect(
 	const channel = requireRegisteredChannel(channelRegistry, params.id);
 
 	await enqueueChannelOperation(channel, async () => {
-		if (channel.status === 'connected') {
-			logger.debug({ channelId: params.id }, 'Channel is already connected');
+		if (!canConnectRegisteredChannel(channel.status)) {
+			logger.debug({ channelId: params.id, status: channel.status }, 'Channel connect skipped');
 			return;
 		}
 

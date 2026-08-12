@@ -14,7 +14,7 @@ import type {
 } from '@genii/comms/events/types';
 import { ChannelRegistryImpl } from '@genii/comms/registry/impl';
 import { type ChannelStatus, createChannelId, type Disposable } from '@genii/comms/types/core';
-import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import { RpcApplicationErrorCode, type RpcMethodResults, type RpcMethods } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { ContinueConfig, Coordinator } from '@genii/orchestrator/coordinator/types';
@@ -113,6 +113,10 @@ class ManualChannel implements Channel {
 
 	get status(): ChannelStatus {
 		return this._status;
+	}
+
+	setStatus(status: ChannelStatus): void {
+		this._status = status;
 	}
 
 	async process(intent: OutboundIntent): Promise<IntentProcessedConfirmation> {
@@ -637,6 +641,38 @@ describe('CLI commands over a real daemon RPC socket', () => {
 		expect(channel.disconnectCalls).toBe(1);
 	});
 
+	it('does not start another connect while connecting or reconnecting', async () => {
+		const channel = registerTestChannel();
+		const client = new SocketTransportClient({ socketPath, reconnect: { enabled: false } }, triggerLogger.logger);
+		clients.push(client);
+		await client.connect();
+
+		channel.setStatus('reconnecting');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(0);
+
+		channel.setStatus('connecting');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(0);
+
+		channel.setStatus('error');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(1);
+		expect(channel.status).toBe('connected');
+	});
+
 	it('serializes concurrent lifecycle requests behind an in-flight connect', async () => {
 		const channel = registerTestChannel();
 		const connectGate = channel.deferNextConnect();
@@ -777,7 +813,7 @@ describe('CLI commands over a real daemon RPC socket', () => {
 		expect(channel.status).toBe('disconnected');
 	});
 
-	it.each(['connect', 'disconnect'] as const)(
+	it.each(['connect', 'disconnect', 'reconnect'] as const)(
 		'emits only a not-found JSON error when channel %s misses',
 		async (command) => {
 			const result = await runCliWithExit(['--output', 'json', 'channel', command, 'does-not-exist']);
@@ -790,6 +826,21 @@ describe('CLI commands over a real daemon RPC socket', () => {
 			});
 		},
 	);
+
+	it('returns the canonical not-found RPC code for a missing channel', async () => {
+		const client = new SocketTransportClient({ socketPath, reconnect: { enabled: false } }, triggerLogger.logger);
+		clients.push(client);
+		await client.connect();
+
+		await expect(
+			client.request('channel.connect', {
+				id: createChannelId('does-not-exist'),
+			} satisfies RpcMethods['channel.connect']),
+		).rejects.toMatchObject({
+			code: RpcApplicationErrorCode.NotFound,
+			message: 'Channel not found: does-not-exist',
+		});
+	});
 
 	it('tails only the selected agent across replay, overlap, and live publication', async () => {
 		const circularInput: Record<string, unknown> = { source: 'replay', count: 1n };

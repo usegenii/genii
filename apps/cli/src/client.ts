@@ -5,7 +5,7 @@
  */
 
 import type * as net from 'node:net';
-import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import { RpcApplicationErrorCode, type RpcMethodResults, type RpcMethods } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 import { NotFoundError } from './utils/errors';
 
@@ -290,7 +290,7 @@ export class RpcResponseError extends Error {
 }
 
 function rethrowChannelNotFound(error: unknown, id: string): never {
-	if (error instanceof RpcResponseError && error.message === `Channel not found: ${id}`) {
+	if (error instanceof RpcResponseError && error.code === RpcApplicationErrorCode.NotFound) {
 		throw new NotFoundError('Channel', id);
 	}
 	throw error;

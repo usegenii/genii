@@ -16,6 +16,12 @@ import type {
 
 export type RpcLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
+/** Implementation-defined JSON-RPC server error codes used by the daemon. */
+export const RpcApplicationErrorCode = {
+	/** Requested daemon resource does not exist. */
+	NotFound: -32001,
+} as const;
+
 export interface DaemonStatus {
 	status: 'running' | 'stopping';
 	uptimeMs: number;
