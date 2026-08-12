@@ -55,7 +55,7 @@
 		"@genii/models": "workspace:*",
 		"@genii/orchestrator": "workspace:*",
 		"@types/node": "24.13.3",
-		"@types/react": "^18.0.0",
+		"@types/react": "18.3.27",
 		"tsup": "8.5.1",
 		"typescript": "7.0.2",
 		"vitest": "3.2.7"
