@@ -1,81 +1,119 @@
 # Genii
 
-An autonomous AI agent platform that runs in the background, maintaining persistent conversations across multiple channels (Telegram, Discord, etc.). A digital companion that lives on your machine, learns your preferences, and can be reached through various messaging platforms.
+An autonomous AI agent platform that runs in the background and maintains persistent conversations. Genii can be
+reached through Telegram today, with platform-neutral contracts for adding more messaging integrations.
 
 ## Features
 
 - **Persistent Agents**: AI agents that maintain conversation history and context across sessions
-- **Multi-Channel Support**: Connect to Telegram, Discord, and other messaging platforms
-- **Configurable Models**: Support for Anthropic, OpenAI, and Google AI models
+- **Telegram Integration**: Connect agents to the currently implemented messaging channel
+- **Configurable Models**: Configure named built-in or custom providers through supported API protocols
 - **Guidance System**: Customize agent personality and behavior through markdown files
-- **Background Daemon**: Runs quietly in the background, always available
-- **CLI Control**: Full control over agents, channels, and configuration via command line
+- **Daemon Runtime**: Keeps agent state and integrations in a long-running process
+- **CLI Control**: Inspect and operate agents, the daemon, and configuration from the command line
 
 ## Quick Start
 
-### 1. Install Dependencies
+This workflow is verified from a fresh source checkout using a POSIX shell. Run every command from the repository root.
+A packaged install exposes `genii` and `genii-daemon`; the tracked `node bin/...` wrappers below invoke those same built
+entry points from source.
+
+### 1. Install and Build
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-### 2. Configure Providers and Models
+The build is required before running the source wrappers because workspace package exports resolve through `dist`.
 
-Create the configuration directory:
+### 2. Find the Configuration and Data Directory
+
+Use the CLI rather than hard-coding a platform path:
 
 ```bash
-mkdir -p ~/.config/genii/guidance
+node bin/genii.js config path
 ```
 
-Create `~/.config/genii/providers.toml`:
-
-```toml
-[anthropic]
-type = "anthropic"
-base-url = "https://api.anthropic.com"
-credential = "secret:anthropic-api-key"
-```
-
-Create `~/.config/genii/models.toml`:
-
-```toml
-[sonnet]
-provider = "anthropic"
-model-id = "claude-sonnet-4-20250514"
-thinking-level = "low"
-
-[opus]
-provider = "anthropic"
-model-id = "claude-opus-4-5-20251101"
-thinking-level = "medium"
-```
-
-### 3. Store Your API Key
-
-On macOS, store your API key in the system keychain:
+The installed equivalent is `genii config path`. For scripts, `genii --quiet config path` prints only the directory;
+from this source checkout, use:
 
 ```bash
-security add-generic-password -s genii -a anthropic-api-key -w "sk-ant-your-key-here"
+node bin/genii.js --quiet config path
 ```
 
-On Linux, Genii prefers the system Secret Service through libsecret. If it is unavailable, such as on a headless
-host, Genii falls back to `<data-path>/secrets.json`, using the daemon's configured data path. The default data path is
-`$XDG_DATA_HOME/genii` when `XDG_DATA_HOME` is set, otherwise `~/.local/share/genii`.
+Genii stores configuration and runtime data together. The defaults are:
 
-On POSIX systems, Genii accepts the fallback only when the data path is a real directory, not a symbolic link, owned by
-the current user, and `secrets.json` is a real regular file, not a symbolic link, owned by the current user. Genii
-creates missing directories with mode `0700` and missing secret files with mode `0600`. Existing paths are
-validation-only: Genii never changes their mode or ownership, and accepts usable secure modes that are stricter subsets
-of `0700` for the directory or `0600` for the file. If an existing mode grants permissions outside those limits, or a path
-has an unsafe owner, type, or resolution, Genii fails closed with an actionable error instead of reading or writing
-credentials.
+| Platform | Default directory |
+| --- | --- |
+| Linux and other Unix systems | `$XDG_DATA_HOME/genii`, or `~/.local/share/genii` when `XDG_DATA_HOME` is unset |
+| macOS | `~/Library/Application Support/genii` |
+| Windows | `%APPDATA%\genii`, or `~/AppData/Roaming/genii` when `APPDATA` is unset |
 
-Create the default fallback paths securely before adding the JSON. If the daemon uses a custom data path, assign that
-path to `GENII_DATA_DIR` instead. For an existing current-user-owned, non-symbolic-link store rejected only because of
-its mode, the `chmod` commands below are also the manual remediation:
+Starting the daemon with an explicit `--data <path>` replaces this default. `config path` reports the default only, so
+use the same explicit path for any manual work on a custom data directory.
+
+### 3. Start the Daemon in the Foreground
+
+In terminal 1, run:
 
 ```bash
-GENII_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/genii"
+export GENII_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/genii-daemon.sock"
+node bin/genii-daemon.js --socket "$GENII_SOCKET" --log-level debug
+```
+
+Leave it running. The explicit socket keeps the source daemon and CLI on the same endpoint, including on systems that
+set `XDG_RUNTIME_DIR`. The foreground entry point exposes startup failures directly and works in a source checkout.
+
+### 4. Configure a Provider
+
+In terminal 2, provide your Z.ai Coding Plan key through the environment and run non-interactive onboarding:
+
+```bash
+export GENII_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/genii-daemon.sock"
+export ZAI_API_KEY="<your-zai-api-key>"
+node bin/genii.js onboard \
+  --non-interactive \
+  --accept-disclaimer \
+  --provider zai \
+  --api-key "$ZAI_API_KEY" \
+  --models glm-4.7
+```
+
+Provider IDs name configured endpoints, while provider types select an API protocol. This example uses the built-in
+Z.ai provider through its OpenAI-compatible API. Provider choices can change by release; run
+`node bin/genii.js onboard --help` and use interactive `node bin/genii.js onboard` to see the choices implemented by
+your checkout, including custom-provider options.
+
+Onboarding writes configuration, guidance templates, preferences, and the provider credential. Stop the daemon in
+terminal 1 with Ctrl+C, then run the foreground command again so it loads the new configuration.
+
+### 5. Verify and Spawn an Agent
+
+```bash
+node bin/genii.js daemon status
+node bin/genii.js agent spawn --model zai/glm-4.7 "Hello, world!"
+node bin/genii.js agent list
+```
+
+### How Credentials Are Stored
+
+Genii uses macOS Keychain and Windows Credential Manager directly. On Linux and other platforms, it probes for an
+available native secret service and uses it when the probe succeeds. Only when that probe fails does Genii use
+`<data-directory>/secrets.json`. An existing fallback file does not override an available native store, and a later
+native-store error does not switch the process to the file.
+
+On POSIX systems, the fallback data directory and file must be real paths rather than symbolic links, owned by the
+current user, and usable with no group, world, or special permission bits. Genii creates a missing directory with mode
+`0700` and a missing file with mode `0600`. Existing ownership and permissions are validation-only: Genii reports an
+error instead of changing them. Modes that are stricter usable subsets are accepted, but `0700` and `0600` are the
+recommended settings.
+
+Only prepare the JSON fallback manually when native secret storage is unavailable. This snippet uses the CLI-reported
+default; if the daemon uses `--data`, replace the first assignment with that explicit path:
+
+```bash
+GENII_DATA_DIR="$(node bin/genii.js --quiet config path)"
 umask 077
 mkdir -p "$GENII_DATA_DIR"
 chmod 700 "$GENII_DATA_DIR"
@@ -83,40 +121,12 @@ touch "$GENII_DATA_DIR/secrets.json"
 chmod 600 "$GENII_DATA_DIR/secrets.json"
 ```
 
+The fallback is a JSON object keyed by the name after `secret:` in configuration. For the quick-start provider:
+
 ```json
 {
-  "anthropic-api-key": "sk-ant-your-key-here"
+  "zai-api-key": "<your-zai-api-key>"
 }
-```
-
-### 4. Create Minimal Guidance
-
-Create `~/.config/genii/guidance/SOUL.md`:
-
-```markdown
-You are a helpful assistant.
-```
-
-### 5. Start the Daemon
-
-```bash
-# Start in foreground for debugging
-cd apps/daemon && pnpm tsx src/index.ts --log-level debug
-
-# Or start via CLI (runs in background)
-cd apps/cli && pnpm tsx bin/genii.ts daemon start
-```
-
-### 6. Spawn an Agent
-
-```bash
-cd apps/cli && pnpm tsx bin/genii.ts agent spawn --model anthropic/sonnet "Hello, world!"
-```
-
-### 7. List Agents
-
-```bash
-cd apps/cli && pnpm tsx bin/genii.ts agent list
 ```
 
 ---
@@ -143,20 +153,26 @@ genii/
 ### Model Identifiers
 
 Models are referenced using the format `provider/model-name`. For example:
-- `anthropic/sonnet` - References the `sonnet` model configured under the `anthropic` provider
-- `anthropic/opus` - References the `opus` model configured under the `anthropic` provider
+
+- `zai/glm-4.7` references the `glm-4.7` model configured under the `zai` provider
+- `my-provider/my-model` references `my-model` under a custom provider named `my-provider`
+
+The provider portion is the configured endpoint ID; its provider type separately selects the API protocol.
 
 ### Configuration Files
 
-All configuration files are stored in `~/.config/genii/` (Linux/macOS) or `%APPDATA%/genii/` (Windows).
+Run `genii config path` to locate the default directory and its configuration files. The source-checkout equivalent is
+`node bin/genii.js config path`. This base directory also contains runtime data; see the platform table and custom
+`--data` caveat in the quick start.
 
-| File | Description |
-|------|-------------|
-| `providers.toml` | Provider configurations (API endpoints, credentials) |
-| `models.toml` | Model configurations (provider reference, model ID, thinking level) |
-| `channels.toml` | Communication channel configurations |
+| Path | Description |
+| --- | --- |
+| `providers.toml` | Provider endpoints, API protocols, and credential references |
+| `models.toml` | Provider references, model IDs, and thinking levels |
+| `channels.toml` | Communication channel configuration |
 | `preferences.toml` | User preferences |
-| `guidance/SOUL.md` | Default agent personality/instructions |
+| `guidance/` | Agent personality and instruction files |
+| `secrets.json` | Linux/other-platform fallback selected only when the native secret-store probe fails |
 
 #### Shell timeout
 
@@ -165,14 +181,17 @@ values are interpreted literally as milliseconds.
 
 ### Thinking Levels
 
-For Anthropic models, you can configure the thinking level:
+The accepted thinking-level values are:
+
 - `off` - No extended thinking
 - `minimal` - Minimal thinking
 - `low` - Low thinking budget
-- `medium` - Medium thinking budget (default for Anthropic)
+- `medium` - Medium thinking budget
 - `high` - High thinking budget
 
-OpenAI and Google models only support `off`.
+Actual support and defaults depend on the configured provider's API protocol and model. An unsupported requested level
+resolves to `off`; omit the setting to use the protocol default. The available onboarding choices, rather than this
+generic value list, are the source of truth for providers implemented by a release.
 
 ## Prerequisites
 
@@ -185,7 +204,8 @@ OpenAI and Google models only support `off`.
 
 ```bash
 # Install dependencies for all packages
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
 ## Development Commands

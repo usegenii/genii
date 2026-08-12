@@ -19,7 +19,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsup",
+		"build": "tsup && tsc --emitDeclarationOnly -p tsconfig.build.json",
 		"dev": "tsup --watch",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",
