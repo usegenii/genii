@@ -30,7 +30,7 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
-	"packageManager": "pnpm@11.20.0",
+	"packageManager": "pnpm@11.21.0",
 	"dependencies": {
 		"@genii/config": "workspace:*",
 		"@genii/orchestrator": "workspace:*"
