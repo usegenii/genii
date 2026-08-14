@@ -34,7 +34,7 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
-	"packageManager": "pnpm@11.20.0",
+	"packageManager": "pnpm@11.21.0",
 	"dependencies": {
 		"@mariozechner/pi-agent-core": "0.73.1",
 		"@mariozechner/pi-ai": "0.73.1",
