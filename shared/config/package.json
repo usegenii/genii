@@ -38,7 +38,7 @@
 	"dependencies": {
 		"@napi-rs/keyring": "1.3.0",
 		"@sinclair/typebox": "0.34.52",
-		"smol-toml": "1.7.1"
+		"smol-toml": "1.7.2"
 	},
 	"devDependencies": {
 		"@types/node": "24.13.3",
