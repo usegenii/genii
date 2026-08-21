@@ -6,6 +6,7 @@
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
+import { handleError } from '../../utils/errors';
 
 /**
  * Disconnect a channel.
@@ -26,16 +27,23 @@ export function disconnectCommand(channel: Command): void {
 			try {
 				await client.connect();
 
-				formatter.message(`Disconnecting channel ${channelId}...`, 'info');
+				if (format === 'human') {
+					formatter.message(`Disconnecting channel ${channelId}...`, 'info');
+				}
 
 				// Note: force and reason options are available but the current RPC
 				// API only supports basic disconnect. These can be extended later.
-				await client.disconnectChannel(channelId);
+				const result = await client.disconnectChannel(channelId);
 
-				formatter.message(`Channel ${channelId} disconnected successfully`, 'success');
+				if (format === 'json') {
+					formatter.success(result);
+				} else if (format === 'human') {
+					formatter.message(`Channel ${channelId} disconnected successfully`, 'success');
+				}
 			} catch (error) {
+				const { exitCode } = handleError(error);
 				formatter.error(error instanceof Error ? error : new Error(String(error)));
-				process.exitCode = 1;
+				process.exitCode = exitCode;
 			} finally {
 				await client.disconnect();
 			}
