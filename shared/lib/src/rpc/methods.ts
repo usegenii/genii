@@ -24,6 +24,15 @@ export interface DaemonStatus {
 	version: string;
 }
 
+/** Default time allowed for a graceful daemon shutdown. */
+export const DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS = 30_000;
+
+/** Time reserved for forced cleanup after graceful shutdown expires. */
+export const FORCED_DAEMON_SHUTDOWN_TIMEOUT_MS = 5_000;
+
+/** How the daemon ultimately completed a shutdown request. */
+export type DaemonShutdownTermination = 'graceful' | 'forced';
+
 export interface AgentSummary {
 	id: AgentSessionId;
 	status: AgentStatus;
@@ -265,7 +274,7 @@ export interface RpcMethods {
 
 export interface RpcMethodResults {
 	'daemon.status': DaemonStatus;
-	'daemon.shutdown': { ok: true };
+	'daemon.shutdown': { ok: true; termination: DaemonShutdownTermination };
 	'daemon.ping': { pong: true };
 	'daemon.reload': { reloaded: string[] };
 	'agent.list': AgentSummary[];
