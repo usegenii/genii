@@ -39,7 +39,7 @@
 		"@genii/daemon": "workspace:*"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.9",
+		"@biomejs/biome": "2.5.10",
 		"tsup": "8.5.1",
 		"tsx": "4.23.12",
 		"turbo": "2.10.11"
