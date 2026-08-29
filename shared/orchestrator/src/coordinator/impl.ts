@@ -151,7 +151,7 @@ export class CoordinatorImpl implements Coordinator {
 
 		this._status = 'stopping';
 
-		const { graceful = true, timeoutMs = 30000 } = options;
+		const { graceful = true, timeoutMs = 30000, signal } = options;
 
 		if (graceful) {
 			// Wait for running agents to complete
@@ -160,10 +160,32 @@ export class CoordinatorImpl implements Coordinator {
 				.filter((h) => h.status === 'running' || h.status === 'waiting');
 
 			if (runningAgents.length > 0) {
-				const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs));
+				let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+				let abortHandler: (() => void) | undefined;
+				const timeout = new Promise<void>((resolve) => {
+					timeoutHandle = setTimeout(resolve, timeoutMs);
+				});
 				const waitAll = Promise.all(runningAgents.map((h) => h.wait()));
+				const gracefulWaits: Promise<unknown>[] = [waitAll, timeout];
+				if (signal) {
+					gracefulWaits.push(
+						new Promise<void>((resolve) => {
+							if (signal.aborted) {
+								resolve();
+								return;
+							}
+							abortHandler = resolve;
+							signal.addEventListener('abort', abortHandler, { once: true });
+						}),
+					);
+				}
 
-				await Promise.race([waitAll, timeout]);
+				try {
+					await Promise.race(gracefulWaits);
+				} finally {
+					if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+					if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+				}
 			}
 		}
 
