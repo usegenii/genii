@@ -6,6 +6,8 @@ on:
       - "v*.*.*"
       - "v*.*.*-rc.*"
 
+permissions: {}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -15,20 +17,22 @@ jobs:
       id-token: write # Required for npm provenance
 
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6.0.10
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 11.25.0
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.20.0"
           registry-url: "https://registry.npmjs.org"
-          cache: "pnpm"
+          package-manager-cache: false
 
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@latest # zizmor: ignore[adhoc-packages] npm provenance needs a current npm CLI
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
