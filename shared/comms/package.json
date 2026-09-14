@@ -39,7 +39,7 @@
 		"marked": "17.0.6"
 	},
 	"devDependencies": {
-		"@types/node": "24.13.3",
+		"@types/node": "24.13.4",
 		"tsup": "8.5.1",
 		"typescript": "7.0.2",
 		"vitest": "3.2.7"
