@@ -148,6 +148,8 @@ protected as user data. Credentials receive separate handling, but the broader d
 vault.
 
 Startup restores state before accepting control or channel traffic. Shutdown stops new work first, then scheduling and
-channel ingress, drains active sessions within a limit, and persists remaining routing state. Failures are surfaced
-through structured logs and lightweight health/status data. Message delivery remains best-effort: there is no durable
-outbound queue or end-to-end exactly-once guarantee.
+channel ingress, drains active sessions within the caller's grace period, and escalates unfinished teardown to forced
+termination. The initiating control connection remains available long enough to return the actual termination outcome,
+then local IPC closes. Incomplete teardown is reported as a failure. Other failures are surfaced through structured
+logs and lightweight health/status data. Message delivery remains best-effort: there is no durable outbound queue or
+end-to-end exactly-once guarantee.

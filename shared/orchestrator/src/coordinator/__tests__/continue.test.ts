@@ -2,7 +2,7 @@
  * Tests for coordinator.continue() method.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AdapterCreateConfig, AgentAdapter, AgentInstance } from '../../adapters/types';
 import type { GuidanceContext, MemorySystem } from '../../guidance/types';
 import type { AgentCheckpoint, SnapshotStore } from '../../snapshot/types';
@@ -177,6 +177,10 @@ vi.mock('../../guidance/context', () => ({
 		return createMockGuidanceContext(root);
 	}),
 }));
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 describe('Coordinator.continue()', () => {
 	describe('tools passing', () => {
@@ -356,5 +360,88 @@ describe('Coordinator.continue()', () => {
 			expect(capturedConfig?.metadata).toEqual({ custom: 'data' });
 			expect(capturedConfig?.input).toEqual(input);
 		});
+	});
+});
+
+describe('Coordinator.shutdown()', () => {
+	it('clears the graceful timeout when running agents have already completed', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const instance = createMockAgentInstance('shutdown-agent');
+		instance.run = vi.fn().mockReturnValue({
+			[Symbol.asyncIterator]: async function* () {
+				yield { type: 'status' as const, status: 'running' as const, timestamp: Date.now() };
+				yield {
+					type: 'done' as const,
+					result: {
+						status: 'completed' as const,
+						output: 'complete',
+						metrics: { durationMs: 0, turns: 0, toolCalls: 0 },
+					},
+					timestamp: Date.now(),
+				};
+			},
+		});
+		const adapter: AgentAdapter = {
+			...createMockAdapter(),
+			create: vi.fn().mockResolvedValue(instance),
+		};
+		const coordinator = createCoordinator({ defaultGuidancePath: '/test/guidance' });
+
+		await coordinator.start();
+		const handle = await coordinator.spawn(adapter, { guidancePath: '/test/guidance' });
+		await handle.start();
+		expect(handle.status).toBe('running');
+
+		await coordinator.shutdown({ graceful: true, timeoutMs: 30_000 });
+
+		expect(coordinator.status).toBe('stopped');
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('terminates remaining agents when graceful shutdown is aborted', async () => {
+		vi.useFakeTimers({ now: 0 });
+		let releaseRun: (() => void) | undefined;
+		const runBlocked = new Promise<void>((resolve) => {
+			releaseRun = resolve;
+		});
+		const instance = createMockAgentInstance('aborted-shutdown-agent');
+		instance.run = vi.fn().mockReturnValue({
+			[Symbol.asyncIterator]: async function* () {
+				yield { type: 'status' as const, status: 'running' as const, timestamp: Date.now() };
+				await runBlocked;
+			},
+		});
+		const adapter: AgentAdapter = {
+			...createMockAdapter(),
+			create: vi.fn().mockResolvedValue(instance),
+		};
+		const coordinator = createCoordinator({ defaultGuidancePath: '/test/guidance' });
+
+		await coordinator.start();
+		const handle = await coordinator.spawn(adapter, { guidancePath: '/test/guidance' });
+		const startPromise = handle.start();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(handle.status).toBe('running');
+
+		const controller = new AbortController();
+		const shutdownPromise = coordinator.shutdown({
+			graceful: true,
+			timeoutMs: 30_000,
+			signal: controller.signal,
+		});
+		await Promise.resolve();
+		expect(instance.abort).not.toHaveBeenCalled();
+
+		controller.abort();
+		await shutdownPromise;
+
+		expect(instance.abort).toHaveBeenCalledOnce();
+		expect(handle.status).toBe('terminated');
+		expect(coordinator.status).toBe('stopped');
+		expect(vi.getTimerCount()).toBe(0);
+
+		releaseRun?.();
+		await startPromise;
 	});
 });

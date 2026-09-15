@@ -7,10 +7,12 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createDaemonClient } from './client';
 
 interface RpcRequest {
 	id: string;
 	method: string;
+	params?: unknown;
 }
 
 interface PingServer {
@@ -48,7 +50,7 @@ function getDisposableSocketPath(directory: string, name: string): string {
 	return join(directory, `${name}.sock`);
 }
 
-async function startPingServer(socketPath: string): Promise<PingServer> {
+async function startPingServer(socketPath: string, responseDelayMs = 0): Promise<PingServer> {
 	const requests: RpcRequest[] = [];
 	const server = createServer((socket) => {
 		let buffer = '';
@@ -64,7 +66,19 @@ async function startPingServer(socketPath: string): Promise<PingServer> {
 
 				const request = JSON.parse(line) as RpcRequest;
 				requests.push(request);
-				socket.write(`${JSON.stringify({ id: request.id, result: { pong: true } })}\n`);
+				const result =
+					request.method === 'daemon.shutdown'
+						? { ok: true, termination: 'forced' as const }
+						: { pong: true as const };
+				const respond = (): void => {
+					socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
+				};
+
+				if (responseDelayMs > 0) {
+					setTimeout(respond, responseDelayMs);
+				} else {
+					respond();
+				}
 			}
 		});
 	});
@@ -168,5 +182,55 @@ describe('SocketDaemonClient socket path resolution', () => {
 		const pingServer = await startPingServer(defaultSocketPath);
 		servers.push(pingServer);
 		await expectPing({ mode: 'ping' }, environment, pingServer);
+	});
+
+	it('sends canonical shutdown parameters and allows the lifecycle response to exceed the default request timeout', async () => {
+		const socketPath = getDisposableSocketPath(testDirectory, 'shutdown');
+		const pingServer = await startPingServer(socketPath, 50);
+		servers.push(pingServer);
+		const client = createDaemonClient({ socketPath, connectTimeoutMs: 1000, requestTimeoutMs: 10 });
+
+		await client.connect();
+		try {
+			await expect(client.shutdown({ graceful: true, timeoutMs: 25 })).resolves.toEqual({
+				ok: true,
+				termination: 'forced',
+			});
+		} finally {
+			await client.disconnect();
+		}
+
+		expect(pingServer.requests).toEqual([
+			{
+				id: 'req-1',
+				method: 'daemon.shutdown',
+				params: { graceful: true, timeoutMs: 25 },
+			},
+		]);
+	});
+
+	it('canonicalizes the legacy positional shutdown arguments', async () => {
+		const socketPath = getDisposableSocketPath(testDirectory, 'legacy-shutdown');
+		const pingServer = await startPingServer(socketPath);
+		servers.push(pingServer);
+		const client = createDaemonClient({ socketPath, connectTimeoutMs: 1000 });
+
+		await client.connect();
+		try {
+			await expect(client.shutdown('hard', 17)).resolves.toEqual({
+				ok: true,
+				termination: 'forced',
+			});
+		} finally {
+			await client.disconnect();
+		}
+
+		expect(pingServer.requests).toEqual([
+			{
+				id: 'req-1',
+				method: 'daemon.shutdown',
+				params: { graceful: false, timeoutMs: 17 },
+			},
+		]);
 	});
 });

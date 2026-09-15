@@ -5,7 +5,12 @@
  */
 
 import type * as net from 'node:net';
-import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import {
+	DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS,
+	FORCED_DAEMON_SHUTDOWN_TIMEOUT_MS,
+	type RpcMethodResults,
+	type RpcMethods,
+} from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 
 // =============================================================================
@@ -247,6 +252,9 @@ const DEFAULT_OPTIONS = {
 	requestTimeoutMs: 30000,
 } as const;
 
+const DAEMON_SHUTDOWN_RESPONSE_MARGIN_MS = 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 // =============================================================================
 // Pending Request Tracker
 // =============================================================================
@@ -254,7 +262,44 @@ const DEFAULT_OPTIONS = {
 interface PendingRequest {
 	resolve: (value: unknown) => void;
 	reject: (error: Error) => void;
-	timeout: ReturnType<typeof setTimeout>;
+	cancelTimeout: () => void;
+}
+
+/**
+ * Schedule a cancellable timeout, splitting delays that exceed Node's timer limit.
+ */
+function scheduleTimeout(callback: () => void, timeoutMs: number): () => void {
+	let remainingMs = timeoutMs;
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	let cancelled = false;
+
+	const scheduleNext = (): void => {
+		const delayMs = Math.min(remainingMs, MAX_TIMER_DELAY_MS);
+		const startedAt = Date.now();
+
+		timeout = setTimeout(() => {
+			if (cancelled) {
+				return;
+			}
+
+			remainingMs -= Date.now() - startedAt;
+			if (remainingMs <= 0) {
+				callback();
+				return;
+			}
+
+			scheduleNext();
+		}, delayMs);
+	};
+
+	scheduleNext();
+
+	return () => {
+		cancelled = true;
+		if (timeout !== undefined) {
+			clearTimeout(timeout);
+		}
+	};
 }
 
 // =============================================================================
@@ -321,7 +366,8 @@ export interface DaemonClient {
 	// Daemon methods
 	ping(): Promise<{ pong: true }>;
 	status(): Promise<DaemonStatus>;
-	shutdown(mode: 'graceful' | 'hard', timeout?: number): Promise<void>;
+	shutdown(params: RpcMethods['daemon.shutdown']): Promise<RpcMethodResults['daemon.shutdown']>;
+	shutdown(mode: 'graceful' | 'hard', timeoutMs?: number): Promise<RpcMethodResults['daemon.shutdown']>;
 	reload(): Promise<{ reloaded: string[] }>;
 
 	// Agent methods
@@ -443,7 +489,7 @@ class SocketDaemonClient implements DaemonClient {
 
 				// Reject all pending requests
 				for (const [id, pending] of this._pendingRequests) {
-					clearTimeout(pending.timeout);
+					pending.cancelTimeout();
 					pending.reject(new NotConnectedError('Connection closed'));
 					this._pendingRequests.delete(id);
 				}
@@ -471,7 +517,7 @@ class SocketDaemonClient implements DaemonClient {
 		});
 	}
 
-	private async _request<T>(method: string, params?: unknown): Promise<T> {
+	private async _request<T>(method: string, params?: unknown, requestTimeoutMs = this._requestTimeoutMs): Promise<T> {
 		if (!this._connected || !this._socket) {
 			throw new NotConnectedError();
 		}
@@ -480,15 +526,15 @@ class SocketDaemonClient implements DaemonClient {
 		const request: RpcRequest = { id, method, params };
 
 		return new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
+			const cancelTimeout = scheduleTimeout(() => {
 				this._pendingRequests.delete(id);
-				reject(new RequestTimeoutError(id, this._requestTimeoutMs));
-			}, this._requestTimeoutMs);
+				reject(new RequestTimeoutError(id, requestTimeoutMs));
+			}, requestTimeoutMs);
 
 			this._pendingRequests.set(id, {
 				resolve: resolve as (value: unknown) => void,
 				reject,
-				timeout,
+				cancelTimeout,
 			});
 
 			const data = encode(request);
@@ -520,7 +566,7 @@ class SocketDaemonClient implements DaemonClient {
 		}
 
 		this._pendingRequests.delete(response.id);
-		clearTimeout(pending.timeout);
+		pending.cancelTimeout();
 
 		if (response.error) {
 			pending.reject(new RpcResponseError(response.error.code, response.error.message, response.error.data));
@@ -551,8 +597,25 @@ class SocketDaemonClient implements DaemonClient {
 		return this._request('daemon.status');
 	}
 
-	async shutdown(mode: 'graceful' | 'hard', timeout?: number): Promise<void> {
-		return this._request('daemon.shutdown', { mode, timeout });
+	shutdown(params: RpcMethods['daemon.shutdown']): Promise<RpcMethodResults['daemon.shutdown']>;
+	shutdown(mode: 'graceful' | 'hard', timeoutMs?: number): Promise<RpcMethodResults['daemon.shutdown']>;
+	async shutdown(
+		paramsOrMode: RpcMethods['daemon.shutdown'] | 'graceful' | 'hard',
+		timeoutMs?: number,
+	): Promise<RpcMethodResults['daemon.shutdown']> {
+		const params: RpcMethods['daemon.shutdown'] =
+			typeof paramsOrMode === 'string'
+				? {
+						graceful: paramsOrMode !== 'hard',
+						...(timeoutMs === undefined ? {} : { timeoutMs }),
+					}
+				: paramsOrMode;
+		const gracefulTimeoutMs =
+			params.graceful === false ? 0 : (params.timeoutMs ?? DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS);
+		const requestTimeoutMs =
+			gracefulTimeoutMs + FORCED_DAEMON_SHUTDOWN_TIMEOUT_MS + DAEMON_SHUTDOWN_RESPONSE_MARGIN_MS;
+
+		return this._request('daemon.shutdown', params, requestTimeoutMs);
 	}
 
 	async reload(): Promise<{ reloaded: string[] }> {

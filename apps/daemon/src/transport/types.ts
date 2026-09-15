@@ -84,6 +84,12 @@ export interface TransportConnection {
 	notify(notification: RpcNotification): void;
 
 	/**
+	 * Run a callback after the response currently being handled has been flushed.
+	 * If the connection closes first, the callback runs during connection cleanup.
+	 */
+	onResponseSettled(requestId: string, callback: () => void): void;
+
+	/**
 	 * Close the connection.
 	 */
 	close(): void;
@@ -109,6 +115,11 @@ export interface TransportServer {
 	 * Start listening for connections.
 	 */
 	listen(): Promise<void>;
+
+	/**
+	 * Stop accepting new connections while preserving existing connections.
+	 */
+	stopAccepting(): Promise<void>;
 
 	/**
 	 * Stop the server and close all connections.
