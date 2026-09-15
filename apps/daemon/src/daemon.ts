@@ -10,6 +10,7 @@
 
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
+import { enqueueChannelOperation } from './channels/lifecycle';
 import type { CommandRegistryInterface } from './commands/registry';
 import type { ConversationManager } from './conversations/manager';
 import type { Logger, LogLevel } from './logging/logger';
@@ -369,9 +370,13 @@ export class DaemonImpl implements Daemon {
 		const channels = this._channelRegistry.list();
 		const commandDefs = this._commandRegistry?.definitions() ?? [];
 
-		for (const channel of channels) {
-			if (channel.status === 'disconnected') {
-				try {
+		const connectPromises = channels.map(async (channel) => {
+			try {
+				await enqueueChannelOperation(channel, async () => {
+					if (channel.status !== 'disconnected') {
+						return;
+					}
+
 					this._logger.debug({ channelId: channel.id }, 'Connecting channel');
 					await channel.connect();
 
@@ -390,11 +395,13 @@ export class DaemonImpl implements Daemon {
 							);
 						}
 					}
-				} catch (error) {
-					this._logger.warn({ error, channelId: channel.id }, 'Failed to connect channel');
-				}
+				});
+			} catch (error) {
+				this._logger.warn({ error, channelId: channel.id }, 'Failed to connect channel');
 			}
-		}
+		});
+
+		await Promise.all(connectPromises);
 	}
 
 	/**
@@ -403,16 +410,20 @@ export class DaemonImpl implements Daemon {
 	private async _disconnectChannels(): Promise<void> {
 		const channels = this._channelRegistry.list();
 
-		const disconnectPromises = channels
-			.filter((channel) => channel.status === 'connected')
-			.map(async (channel) => {
-				try {
+		const disconnectPromises = channels.map(async (channel) => {
+			try {
+				await enqueueChannelOperation(channel, async () => {
+					if (channel.status === 'disconnected') {
+						return;
+					}
+
 					this._logger.debug({ channelId: channel.id }, 'Disconnecting channel');
 					await channel.disconnect();
-				} catch (error) {
-					this._logger.warn({ error, channelId: channel.id }, 'Error disconnecting channel');
-				}
-			});
+				});
+			} catch (error) {
+				this._logger.warn({ error, channelId: channel.id }, 'Error disconnecting channel');
+			}
+		});
 
 		await Promise.all(disconnectPromises);
 	}
