@@ -32,7 +32,7 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
-	"packageManager": "pnpm@11.27.0",
+	"packageManager": "pnpm@11.27.1",
 	"devDependencies": {
 		"@types/node": "24.13.6",
 		"tsup": "8.5.1",
