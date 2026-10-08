@@ -39,7 +39,7 @@
 		"@mariozechner/pi-agent-core": "0.73.1",
 		"@mariozechner/pi-ai": "0.73.1",
 		"@sinclair/typebox": "0.34.52",
-		"chrono-node": "2.10.1"
+		"chrono-node": "2.10.2"
 	},
 	"devDependencies": {
 		"@types/node": "24.19.1",
