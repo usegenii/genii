@@ -6,6 +6,7 @@
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
+import { handleError } from '../../utils/errors';
 
 /**
  * Sleep for a given number of milliseconds.
@@ -36,20 +37,27 @@ export function reconnectCommand(channel: Command): void {
 			try {
 				await client.connect();
 
-				formatter.message(`Reconnecting channel ${channelId}...`, 'info');
+				if (format === 'human') {
+					formatter.message(`Reconnecting channel ${channelId}...`, 'info');
+				}
 
 				// Use the daemon's reconnect RPC method which handles the full cycle
-				await client.reconnectChannel(channelId);
+				const result = await client.reconnectChannel(channelId);
 
 				// If there's a delay configured and we want to wait before confirming
 				if (delayMs > 0) {
 					await sleep(delayMs);
 				}
 
-				formatter.message(`Channel ${channelId} reconnected successfully`, 'success');
+				if (format === 'json') {
+					formatter.success(result);
+				} else if (format === 'human') {
+					formatter.message(`Channel ${channelId} reconnected successfully`, 'success');
+				}
 			} catch (error) {
+				const { exitCode } = handleError(error);
 				formatter.error(error instanceof Error ? error : new Error(String(error)));
-				process.exitCode = 1;
+				process.exitCode = exitCode;
 			} finally {
 				await client.disconnect();
 			}

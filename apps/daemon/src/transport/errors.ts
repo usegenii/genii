@@ -10,6 +10,8 @@
  * - -32000 to -32099: Server error (reserved for implementation-defined errors)
  */
 
+import { RpcApplicationErrorCode } from '@genii/lib/rpc/methods';
+
 // =============================================================================
 // Standard JSON-RPC Error Codes
 // =============================================================================
@@ -28,6 +30,8 @@ export const RpcErrorCode = {
 	InvalidParams: -32602,
 	/** Internal JSON-RPC error */
 	InternalError: -32603,
+	/** Requested daemon resource does not exist */
+	NotFound: RpcApplicationErrorCode.NotFound,
 	/** Reserved for implementation-defined server-errors (min) */
 	ServerErrorMin: -32099,
 	/** Reserved for implementation-defined server-errors (max) */
@@ -146,6 +150,17 @@ export class ServerError extends RpcException {
 		}
 		super(code, message, data);
 		this.name = 'ServerError';
+	}
+}
+
+/**
+ * Resource not found - the requested daemon resource does not exist.
+ * Code: -32001
+ */
+export class ResourceNotFoundError extends ServerError {
+	constructor(resourceType: string, resourceId: string) {
+		super(RpcErrorCode.NotFound, `${resourceType} not found: ${resourceId}`, { resourceType, resourceId });
+		this.name = 'ResourceNotFoundError';
 	}
 }
 

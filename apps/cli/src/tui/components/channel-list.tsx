@@ -5,6 +5,7 @@
 
 import { Box, Text } from 'ink';
 import type React from 'react';
+import type { ChannelSummary } from '../../client';
 import { useListNavigation } from '../hooks/use-keyboard';
 
 /**
@@ -14,7 +15,7 @@ export interface Channel {
 	id: string;
 	name: string;
 	type: string;
-	status: 'connected' | 'disconnected' | 'error';
+	status: ChannelSummary['status'];
 	messageCount: number;
 }
 
