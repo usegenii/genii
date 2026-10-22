@@ -1,10 +1,30 @@
-import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS } from '@genii/lib/rpc/methods';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../logging/logger';
 import { ShutdownManager, type ShutdownMode } from '../manager';
 
-/**
- * Create a minimal mock logger for testing.
- */
+interface Deferred<T> {
+	promise: Promise<T>;
+	resolve(value: T): void;
+}
+
+function deferred<T>(): Deferred<T> {
+	let resolvePromise: ((value: T) => void) | undefined;
+	const promise = new Promise<T>((resolve) => {
+		resolvePromise = resolve;
+	});
+	return {
+		promise,
+		resolve: (value) => resolvePromise?.(value),
+	};
+}
+
+function blockEventLoop(timeoutMs: number): void {
+	const blocker = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+	Atomics.wait(blocker, 0, 0, timeoutMs);
+}
+
+/** Create a minimal mock logger for testing. */
 function createMockLogger(): Logger {
 	return {
 		debug: vi.fn(),
@@ -15,295 +35,287 @@ function createMockLogger(): Logger {
 	} as unknown as Logger;
 }
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 describe('ShutdownManager', () => {
-	describe('register()', () => {
-		it('should register a shutdown handler', () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const handler = vi.fn().mockResolvedValue(undefined);
+	it('registers, replaces, and unregisters handlers', async () => {
+		const logger = createMockLogger();
+		const manager = new ShutdownManager(logger);
+		const first = vi.fn().mockResolvedValue(undefined);
+		const replacement = vi.fn().mockResolvedValue(undefined);
 
-			manager.register('test-handler', handler, 10);
+		manager.register('test-handler', first, 10);
+		manager.register('test-handler', replacement, 20);
+		manager.unregister('test-handler');
+		const result = await manager.execute('graceful');
 
-			expect(logger.debug).toHaveBeenCalledWith(
-				{ name: 'test-handler', priority: 10 },
-				'Registered shutdown handler',
-			);
-		});
+		expect(first).not.toHaveBeenCalled();
+		expect(replacement).not.toHaveBeenCalled();
+		expect(result).toEqual({ mode: 'graceful', completed: true, failedHandlers: [] });
+		expect(logger.warn).toHaveBeenCalledWith({ name: 'test-handler' }, 'Replacing existing shutdown handler');
+	});
 
-		it('should warn when replacing an existing handler', () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const handler1 = vi.fn().mockResolvedValue(undefined);
-			const handler2 = vi.fn().mockResolvedValue(undefined);
+	it('returns a graceful outcome while preserving priority order and same-priority parallelism', async () => {
+		vi.useFakeTimers({ now: 1_000 });
+		const manager = new ShutdownManager(createMockLogger());
+		const executionOrder: string[] = [];
+		const firstLevel = deferred<void>();
 
-			manager.register('test-handler', handler1, 10);
-			manager.register('test-handler', handler2, 20);
+		manager.register(
+			'first-a',
+			async (mode, remainingTimeMs) => {
+				executionOrder.push(`first-a:${mode}:${remainingTimeMs}`);
+				await firstLevel.promise;
+			},
+			10,
+		);
+		manager.register(
+			'first-b',
+			async (mode, remainingTimeMs) => {
+				executionOrder.push(`first-b:${mode}:${remainingTimeMs}`);
+				await firstLevel.promise;
+			},
+			10,
+		);
+		manager.register(
+			'second',
+			async (mode, remainingTimeMs) => {
+				executionOrder.push(`second:${mode}:${remainingTimeMs}`);
+			},
+			20,
+		);
 
-			expect(logger.warn).toHaveBeenCalledWith({ name: 'test-handler' }, 'Replacing existing shutdown handler');
+		const resultPromise = manager.execute('graceful');
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(executionOrder).toEqual([
+			`first-a:graceful:${DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS}`,
+			`first-b:graceful:${DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS}`,
+		]);
+
+		firstLevel.resolve(undefined);
+		const result = await resultPromise;
+
+		expect(executionOrder).toEqual([
+			`first-a:graceful:${DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS}`,
+			`first-b:graceful:${DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS}`,
+			`second:graceful:${DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS}`,
+		]);
+		expect(result).toEqual({ mode: 'graceful', completed: true, failedHandlers: [] });
+		expect(manager.isShuttingDown).toBe(true);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('escalates to hard mode when the graceful deadline expires', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 500 });
+		const receivedModes: ShutdownMode[] = [];
+		let receivedSignal: AbortSignal | undefined;
+
+		manager.register(
+			'graceful-work',
+			async (mode, _remainingTimeMs, signal) => {
+				receivedModes.push(mode);
+				receivedSignal = signal;
+				await new Promise<void>((resolve) => {
+					if (signal?.aborted) {
+						resolve();
+						return;
+					}
+					signal?.addEventListener('abort', () => resolve(), { once: true });
+				});
+			},
+			10,
+		);
+
+		const resultPromise = manager.execute('graceful', 100);
+		await vi.advanceTimersByTimeAsync(100);
+		const result = await resultPromise;
+
+		expect(receivedModes).toEqual(['graceful']);
+		expect(receivedSignal?.aborted).toBe(true);
+		expect(result).toEqual({ mode: 'hard', completed: true, failedHandlers: [] });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('starts immediately in hard mode with one shared remaining-time budget', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 250 });
+		const calls: Array<{ mode: ShutdownMode; remainingTimeMs: number | undefined }> = [];
+
+		manager.register(
+			'first',
+			async (mode, remainingTimeMs) => {
+				calls.push({ mode, remainingTimeMs });
+				await vi.advanceTimersByTimeAsync(50);
+			},
+			10,
+		);
+		manager.register(
+			'second',
+			async (mode, remainingTimeMs) => {
+				calls.push({ mode, remainingTimeMs });
+			},
+			20,
+		);
+
+		const result = await manager.execute('hard');
+
+		expect(calls).toEqual([
+			{ mode: 'hard', remainingTimeMs: 250 },
+			{ mode: 'hard', remainingTimeMs: 200 },
+		]);
+		expect(result).toEqual({ mode: 'hard', completed: true, failedHandlers: [] });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('escalates when synchronous graceful work settles after its absolute deadline', async () => {
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 100 });
+		manager.register(
+			'blocking-work',
+			async () => {
+				blockEventLoop(25);
+			},
+			10,
+		);
+
+		await expect(manager.execute('graceful', 10)).resolves.toEqual({
+			mode: 'hard',
+			completed: true,
+			failedHandlers: [],
 		});
 	});
 
-	describe('unregister()', () => {
-		it('should unregister a handler', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const handler = vi.fn().mockResolvedValue(undefined);
+	it('reports incomplete when synchronous hard work settles after its absolute deadline', async () => {
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 10 });
+		manager.register(
+			'blocking-work',
+			async () => {
+				blockEventLoop(25);
+			},
+			10,
+		);
 
-			manager.register('test-handler', handler, 10);
-			manager.unregister('test-handler');
-
-			await manager.execute('graceful');
-
-			expect(handler).not.toHaveBeenCalled();
-		});
-
-		it('should handle unregistering non-existent handler gracefully', () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-
-			expect(() => manager.unregister('non-existent')).not.toThrow();
+		await expect(manager.execute('hard')).resolves.toEqual({
+			mode: 'hard',
+			completed: false,
+			failedHandlers: [],
 		});
 	});
 
-	describe('execute()', () => {
-		it('should execute handlers in priority order (lower first)', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const executionOrder: number[] = [];
+	it('rechecks the hard deadline before reporting an otherwise empty sequence', async () => {
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 10 });
+		const resultPromise = manager.execute('hard');
 
-			manager.register(
-				'priority-30',
-				async () => {
-					executionOrder.push(30);
-				},
-				30,
-			);
-			manager.register(
-				'priority-10',
-				async () => {
-					executionOrder.push(10);
-				},
-				10,
-			);
-			manager.register(
-				'priority-20',
-				async () => {
-					executionOrder.push(20);
-				},
-				20,
-			);
+		blockEventLoop(25);
 
-			await manager.execute('graceful');
-
-			expect(executionOrder).toEqual([10, 20, 30]);
-		});
-
-		it('should execute handlers with same priority in parallel', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			let startA = 0;
-			let startB = 0;
-
-			manager.register(
-				'handler-a',
-				async () => {
-					startA = Date.now();
-					await new Promise((resolve) => setTimeout(resolve, 50));
-				},
-				10,
-			);
-			manager.register(
-				'handler-b',
-				async () => {
-					startB = Date.now();
-					await new Promise((resolve) => setTimeout(resolve, 50));
-				},
-				10,
-			);
-
-			await manager.execute('graceful');
-
-			// If running in parallel, both should start at nearly the same time
-			const startDiff = Math.abs(startA - startB);
-			expect(startDiff).toBeLessThan(20); // Allow for small timing variance
-		});
-
-		it('should pass shutdown mode to handlers', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const receivedModes: ShutdownMode[] = [];
-
-			manager.register(
-				'test-handler',
-				async (mode) => {
-					receivedModes.push(mode);
-				},
-				10,
-			);
-
-			await manager.execute('graceful');
-			await manager.unregister('test-handler');
-
-			// Reset for second test
-			const manager2 = new ShutdownManager(logger);
-			manager2.register(
-				'test-handler',
-				async (mode) => {
-					receivedModes.push(mode);
-				},
-				10,
-			);
-			await manager2.execute('hard');
-
-			expect(receivedModes).toEqual(['graceful', 'hard']);
-		});
-
-		it('should continue with other handlers when one throws an error', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const handlerCalled = { a: false, b: false, c: false };
-
-			manager.register(
-				'handler-a',
-				async () => {
-					handlerCalled.a = true;
-				},
-				10,
-			);
-			manager.register(
-				'handler-b',
-				async () => {
-					handlerCalled.b = true;
-					throw new Error('Test error');
-				},
-				20,
-			);
-			manager.register(
-				'handler-c',
-				async () => {
-					handlerCalled.c = true;
-				},
-				30,
-			);
-
-			await manager.execute('graceful');
-
-			expect(handlerCalled.a).toBe(true);
-			expect(handlerCalled.b).toBe(true);
-			expect(handlerCalled.c).toBe(true);
-			expect(logger.error).toHaveBeenCalled();
-		});
-
-		it('should not execute if already shutting down', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			let callCount = 0;
-
-			manager.register(
-				'test-handler',
-				async () => {
-					callCount++;
-					await new Promise((resolve) => setTimeout(resolve, 50));
-				},
-				10,
-			);
-
-			// Start two shutdown sequences
-			const promise1 = manager.execute('graceful');
-			const promise2 = manager.execute('graceful');
-
-			await Promise.all([promise1, promise2]);
-
-			expect(callCount).toBe(1);
-			expect(logger.warn).toHaveBeenCalledWith('Shutdown already in progress');
+		await expect(resultPromise).resolves.toEqual({
+			mode: 'hard',
+			completed: false,
+			failedHandlers: [],
 		});
 	});
 
-	describe('graceful vs hard shutdown mode', () => {
-		it('should wait for all handlers in graceful mode', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			const completed: string[] = [];
+	it('shares the in-flight promise and lets a concurrent hard call escalate graceful work', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const logger = createMockLogger();
+		const manager = new ShutdownManager(logger, { hardTimeoutMs: 500 });
+		const receivedModes: ShutdownMode[] = [];
+		let receivedSignal: AbortSignal | undefined;
 
-			manager.register(
-				'slow-handler',
-				async () => {
-					await new Promise((resolve) => setTimeout(resolve, 100));
-					completed.push('slow');
-				},
-				10,
-			);
-			manager.register(
-				'fast-handler',
-				async () => {
-					await new Promise((resolve) => setTimeout(resolve, 10));
-					completed.push('fast');
-				},
-				10,
-			);
+		manager.register(
+			'work',
+			async (mode, _remainingTimeMs, signal) => {
+				receivedModes.push(mode);
+				receivedSignal = signal;
+				await new Promise<void>((resolve) => {
+					if (signal?.aborted) {
+						resolve();
+						return;
+					}
+					signal?.addEventListener('abort', () => resolve(), { once: true });
+				});
+			},
+			10,
+		);
 
-			await manager.execute('graceful');
+		const graceful = manager.execute('graceful', 1_000);
+		await Promise.resolve();
+		await Promise.resolve();
+		const hard = manager.execute('hard');
 
-			expect(completed).toContain('slow');
-			expect(completed).toContain('fast');
-		});
-
-		it('should timeout in hard mode per priority level', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger, { hardTimeoutMs: 50 });
-			const completed: string[] = [];
-
-			manager.register(
-				'very-slow-handler',
-				async () => {
-					await new Promise((resolve) => setTimeout(resolve, 200));
-					completed.push('very-slow');
-				},
-				10,
-			);
-			manager.register(
-				'fast-handler',
-				async () => {
-					await new Promise((resolve) => setTimeout(resolve, 10));
-					completed.push('fast');
-				},
-				20,
-			);
-
-			await manager.execute('hard');
-
-			// Fast handler in priority 20 should complete
-			expect(completed).toContain('fast');
-			// Very slow handler should have been timed out
-			expect(logger.warn).toHaveBeenCalled();
-		});
+		expect(hard).toBe(graceful);
+		await expect(graceful).resolves.toEqual({ mode: 'hard', completed: true, failedHandlers: [] });
+		expect(receivedModes).toEqual(['graceful']);
+		expect(receivedSignal?.aborted).toBe(true);
+		expect(logger.warn).toHaveBeenCalledWith('Shutdown already in progress');
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	describe('isShuttingDown', () => {
-		it('should return false initially', () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
+	it('reports handler failures and continues with later priorities', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const manager = new ShutdownManager(createMockLogger());
+		const laterHandler = vi.fn().mockResolvedValue(undefined);
 
-			expect(manager.isShuttingDown).toBe(false);
-		});
+		manager.register(
+			'failing-handler',
+			async () => {
+				throw new Error('shutdown failed');
+			},
+			10,
+		);
+		manager.register('later-handler', laterHandler, 20);
 
-		it('should return true during shutdown', async () => {
-			const logger = createMockLogger();
-			const manager = new ShutdownManager(logger);
-			let wasShuttingDownDuringHandler = false;
+		const result = await manager.execute('graceful');
 
-			manager.register(
-				'test-handler',
-				async () => {
-					wasShuttingDownDuringHandler = manager.isShuttingDown;
-				},
-				10,
-			);
+		expect(laterHandler).toHaveBeenCalledOnce();
+		expect(result).toEqual({ mode: 'graceful', completed: false, failedHandlers: ['failing-handler'] });
+		expect(vi.getTimerCount()).toBe(0);
+	});
 
-			await manager.execute('graceful');
+	it('invokes every remaining handler without awaiting past the overall hard budget', async () => {
+		vi.useFakeTimers({ now: 0 });
+		const manager = new ShutdownManager(createMockLogger(), { hardTimeoutMs: 50 });
+		const blockingWork = deferred<void>();
+		const laterCalls: Array<{ name: string; mode: ShutdownMode; remainingTimeMs: number | undefined }> = [];
 
-			expect(wasShuttingDownDuringHandler).toBe(true);
-			expect(manager.isShuttingDown).toBe(true);
-		});
+		manager.register(
+			'blocking-handler',
+			async () => {
+				await blockingWork.promise;
+			},
+			10,
+		);
+		manager.register(
+			'later-a',
+			async (mode, remainingTimeMs) => {
+				laterCalls.push({ name: 'later-a', mode, remainingTimeMs });
+			},
+			20,
+		);
+		manager.register(
+			'later-b',
+			async (mode, remainingTimeMs) => {
+				laterCalls.push({ name: 'later-b', mode, remainingTimeMs });
+			},
+			30,
+		);
+
+		const resultPromise = manager.execute('hard');
+		await vi.advanceTimersByTimeAsync(50);
+		const result = await resultPromise;
+
+		expect(result).toEqual({ mode: 'hard', completed: false, failedHandlers: [] });
+		expect(laterCalls).toEqual([
+			{ name: 'later-a', mode: 'hard', remainingTimeMs: 0 },
+			{ name: 'later-b', mode: 'hard', remainingTimeMs: 0 },
+		]);
+		expect(vi.getTimerCount()).toBe(0);
+
+		blockingWork.resolve(undefined);
+		await Promise.resolve();
 	});
 });

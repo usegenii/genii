@@ -10,7 +10,7 @@
 
 import type { RpcMethodName } from '@genii/lib/rpc/methods';
 import type { Logger } from '../logging/logger';
-import { MethodNotFoundError } from '../transport/errors';
+import { MethodNotFoundError, ServerError } from '../transport/errors';
 import type { Disposable, RpcRequest, TransportConnection, TransportServer } from '../transport/types';
 import type { RpcHandlerContext, RpcMethodHandler } from './handlers';
 import type { RuntimePublisher } from './runtime-publisher';
@@ -42,7 +42,7 @@ export interface RpcServerConfig {
 	/** Transport server for handling connections */
 	transport: TransportServer;
 	/** Base handler context (without connection) */
-	handlerContext: Omit<RpcHandlerContext, 'connection'>;
+	handlerContext: Omit<RpcHandlerContext, 'connection' | 'requestId'>;
 	/** Method handlers */
 	handlers: Map<RpcMethodName, RpcMethodHandler>;
 	/** Subscription manager for handling subscriptions */
@@ -63,6 +63,11 @@ export interface RpcServer {
 	 * Start the RPC server.
 	 */
 	start(): Promise<void>;
+
+	/**
+	 * Stop accepting new RPC work while preserving lifecycle control requests.
+	 */
+	stopAccepting(): Promise<void>;
 
 	/**
 	 * Stop the RPC server.
@@ -89,7 +94,7 @@ export interface RpcServer {
  */
 class RpcServerImpl implements RpcServer {
 	private readonly _transport: TransportServer;
-	private readonly _handlerContext: Omit<RpcHandlerContext, 'connection'>;
+	private readonly _handlerContext: Omit<RpcHandlerContext, 'connection' | 'requestId'>;
 	private readonly _handlers: Map<RpcMethodName, RpcMethodHandler>;
 	private readonly _subscriptionManager: SubscriptionManager;
 	private readonly _runtimePublisher: RuntimePublisher;
@@ -97,6 +102,10 @@ class RpcServerImpl implements RpcServer {
 	private readonly _connections: Map<string, TransportConnection>;
 
 	private _running = false;
+	private _acceptingRequests = false;
+	private _pendingShutdownResponses = 0;
+	private _shutdownResponseWaiters = new Set<() => void>();
+	private _stopPromise: Promise<void> | undefined;
 	private _requestHandlerDisposable: Disposable | null = null;
 	private _connectionClosedDisposable: Disposable | null = null;
 
@@ -117,6 +126,9 @@ class RpcServerImpl implements RpcServer {
 		}
 
 		this._logger.info('Starting RPC server');
+		this._stopPromise = undefined;
+		this._pendingShutdownResponses = 0;
+		this._shutdownResponseWaiters.clear();
 
 		// Register request handler with transport
 		this._requestHandlerDisposable = this._transport.onRequest(async (request, connection) => {
@@ -130,16 +142,28 @@ class RpcServerImpl implements RpcServer {
 		await this._transport.listen();
 
 		this._running = true;
+		this._acceptingRequests = true;
 		this._logger.info('RPC server started');
 	}
 
-	async stop(): Promise<void> {
+	stop(): Promise<void> {
+		if (this._stopPromise) {
+			return this._stopPromise;
+		}
 		if (!this._running) {
 			this._logger.warn('RPC server is not running');
-			return;
+			return Promise.resolve();
 		}
 
+		this._stopPromise = this._stop();
+		return this._stopPromise;
+	}
+
+	private async _stop(): Promise<void> {
 		this._logger.info('Stopping RPC server');
+		await this.stopAccepting();
+		await this._transport.stopAccepting();
+		await this._waitForShutdownResponses();
 
 		// Clean up all connection subscriptions
 		for (const connectionId of this._connections.keys()) {
@@ -162,7 +186,17 @@ class RpcServerImpl implements RpcServer {
 		this._runtimePublisher.dispose();
 
 		this._running = false;
+		this._acceptingRequests = false;
 		this._logger.info('RPC server stopped');
+	}
+
+	async stopAccepting(): Promise<void> {
+		if (!this._running) {
+			return;
+		}
+
+		this._logger.info('Stopping new RPC work');
+		this._acceptingRequests = false;
 	}
 
 	get running(): boolean {
@@ -186,6 +220,13 @@ class RpcServerImpl implements RpcServer {
 		}
 
 		this._logger.debug({ method, requestId: id, connectionId: connection.id }, 'Handling request');
+		if (!this._acceptingRequests && method !== 'daemon.status' && method !== 'daemon.shutdown') {
+			throw new ServerError(-32001, 'Daemon is shutting down');
+		}
+		if (method === 'daemon.shutdown') {
+			this._pendingShutdownResponses++;
+			connection.onResponseSettled(id, () => this._settleShutdownResponse());
+		}
 
 		// Look up the handler
 		const handler = this._handlers.get(method as RpcMethodName);
@@ -198,6 +239,7 @@ class RpcServerImpl implements RpcServer {
 		const context: RpcHandlerContext = {
 			...this._handlerContext,
 			connection,
+			requestId: id,
 		};
 
 		try {
@@ -209,6 +251,26 @@ class RpcServerImpl implements RpcServer {
 			this._logger.error({ error, method, requestId: id }, 'Handler error');
 			throw error;
 		}
+	}
+
+	private _settleShutdownResponse(): void {
+		this._pendingShutdownResponses = Math.max(0, this._pendingShutdownResponses - 1);
+		if (this._pendingShutdownResponses !== 0) {
+			return;
+		}
+		for (const resolve of this._shutdownResponseWaiters) {
+			resolve();
+		}
+		this._shutdownResponseWaiters.clear();
+	}
+
+	private async _waitForShutdownResponses(): Promise<void> {
+		if (this._pendingShutdownResponses === 0) {
+			return;
+		}
+		await new Promise<void>((resolve) => {
+			this._shutdownResponseWaiters.add(resolve);
+		});
 	}
 
 	/**

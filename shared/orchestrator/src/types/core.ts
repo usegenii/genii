@@ -172,6 +172,8 @@ export interface ShutdownOptions {
 	graceful?: boolean;
 	/** Timeout for graceful shutdown in milliseconds */
 	timeoutMs?: number;
+	/** Signal an in-progress graceful shutdown to terminate remaining agents immediately */
+	signal?: AbortSignal;
 }
 
 /**

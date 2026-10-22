@@ -9,21 +9,22 @@
 
 import type { ChannelRegistry } from '@genii/comms/registry/types';
 import type { Config } from '@genii/config/config';
-import type {
-	AgentDetails,
-	AgentSummary,
-	ChannelDetails,
-	ChannelSummary,
-	ConversationDetails,
-	ConversationSummary,
-	DaemonConfig,
-	DaemonStatus,
-	OnboardResult,
-	OnboardStatus,
-	RpcMethodName,
-	RpcMethodResults,
-	RpcMethods,
-	SchedulerJobInfo,
+import {
+	type AgentDetails,
+	type AgentSummary,
+	type ChannelDetails,
+	type ChannelSummary,
+	type ConversationDetails,
+	type ConversationSummary,
+	type DaemonConfig,
+	type DaemonStatus,
+	DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS,
+	type OnboardResult,
+	type OnboardStatus,
+	type RpcMethodName,
+	type RpcMethodResults,
+	type RpcMethods,
+	type SchedulerJobInfo,
 } from '@genii/lib/rpc/methods';
 import type { ModelFactory } from '@genii/models/factory';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
@@ -34,6 +35,7 @@ import { resolveDefaultModel } from '../models/resolve';
 import { executeOnboard, getOnboardStatus } from '../onboard';
 import type { SchedulerLifecycle } from '../scheduler/types';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
+import { InvalidParamsError, ServerError } from '../transport/errors';
 import type { TransportConnection } from '../transport/types';
 import type { SubscriptionManager } from './subscriptions';
 
@@ -63,10 +65,14 @@ export interface RpcHandlerContext {
 	config: DaemonRuntimeConfig;
 	/** Shutdown manager */
 	shutdownManager: ShutdownManager;
+	/** Finish RPC teardown after the shutdown response has been flushed */
+	stopRpcServer: () => Promise<void>;
 	/** Subscription manager */
 	subscriptionManager: SubscriptionManager;
 	/** The connection making the request */
 	connection: TransportConnection;
+	/** The request whose response is being produced */
+	requestId: string;
 	/** Logger for the handler */
 	logger: Logger;
 	/** Model factory for creating adapters (optional for backward compat) */
@@ -115,7 +121,7 @@ export type RpcHandlers = {
  * @returns Map of method names to handlers
  */
 export function createHandlers(
-	_baseContext: Omit<RpcHandlerContext, 'connection'>,
+	_baseContext: Omit<RpcHandlerContext, 'connection' | 'requestId'>,
 ): Map<RpcMethodName, RpcMethodHandler> {
 	const handlers = new Map<RpcMethodName, RpcMethodHandler>();
 
@@ -222,18 +228,40 @@ async function handleDaemonShutdown(
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['daemon.shutdown']> {
 	const { shutdownManager, logger } = context;
+	if (params.graceful !== undefined && typeof params.graceful !== 'boolean') {
+		throw new InvalidParamsError('graceful must be a boolean');
+	}
+	if (
+		params.timeoutMs !== undefined &&
+		(!Number.isInteger(params.timeoutMs) || params.timeoutMs < 0 || params.timeoutMs > 2_147_483_647)
+	) {
+		throw new InvalidParamsError('timeoutMs must be an integer between 0 and 2147483647');
+	}
+
 	const mode: ShutdownMode = params.graceful !== false ? 'graceful' : 'hard';
+	const timeoutMs = params.timeoutMs ?? DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS;
 
-	logger.info({ mode, timeoutMs: params.timeoutMs }, 'Shutdown requested via RPC');
+	logger.info({ mode, timeoutMs }, 'Shutdown requested via RPC');
 
-	// Schedule shutdown asynchronously so we can return the response first
-	setImmediate(() => {
-		shutdownManager.execute(mode).catch((error) => {
-			logger.error({ error }, 'Error during shutdown');
+	let outcome: Awaited<ReturnType<ShutdownManager['execute']>>;
+	try {
+		outcome = await shutdownManager.execute(mode, timeoutMs);
+	} finally {
+		context.connection.onResponseSettled(context.requestId, () => {
+			context.stopRpcServer().catch((error) => {
+				logger.error({ error }, 'Failed to finish RPC server shutdown');
+			});
 		});
-	});
+	}
 
-	return { ok: true };
+	if (!outcome.completed) {
+		throw new ServerError(-32000, 'Daemon shutdown did not complete', {
+			termination: outcome.mode === 'graceful' ? 'graceful' : 'forced',
+			failedHandlers: outcome.failedHandlers,
+		});
+	}
+
+	return { ok: true, termination: outcome.mode === 'graceful' ? 'graceful' : 'forced' };
 }
 
 async function handleDaemonPing(): Promise<RpcMethodResults['daemon.ping']> {
