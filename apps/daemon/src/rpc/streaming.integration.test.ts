@@ -5,7 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import type { RpcMethodResults, RpcMethods } from '@genii/lib/rpc/methods';
+import type { Channel } from '@genii/comms/channel/types';
+import type {
+	ChannelLifecycleEvent,
+	InboundEvent,
+	IntentProcessedConfirmation,
+	OutboundIntent,
+} from '@genii/comms/events/types';
+import { ChannelRegistryImpl } from '@genii/comms/registry/impl';
+import { type ChannelStatus, createChannelId, type Disposable } from '@genii/comms/types/core';
+import { RpcApplicationErrorCode, type RpcMethodResults, type RpcMethods } from '@genii/lib/rpc/methods';
 import type { RpcNotification } from '@genii/lib/rpc/notifications';
 import type { AgentAdapter } from '@genii/orchestrator/adapters/types';
 import type { ContinueConfig, Coordinator } from '@genii/orchestrator/coordinator/types';
@@ -44,6 +53,7 @@ const runningAgentCreatedAt = new Date('2026-08-10T12:00:00.000Z');
 const runningAgentSnapshotAt = Date.parse('2026-08-10T12:00:05.000Z');
 const completedAgentCreatedAt = new Date('2026-08-10T13:00:00.000Z');
 const completedAgentSnapshotAt = Date.parse('2026-08-10T13:00:12.000Z');
+const testChannelId = createChannelId('telegram');
 
 interface RunningCli {
 	child: ChildProcess;
@@ -63,6 +73,15 @@ interface CliJsonEnvelope<T> {
 	timestamp: string;
 }
 
+interface CliJsonErrorEnvelope {
+	ok: false;
+	error: {
+		message: string;
+		code?: string;
+	};
+	timestamp: string;
+}
+
 type DaemonStatusJsonData = RpcMethodResults['daemon.status'] & { running: true };
 type AgentShowJsonData = NonNullable<RpcMethodResults['agent.get']> & { duration: string };
 
@@ -72,6 +91,74 @@ interface TestAgentHandleOptions {
 	createdAt?: Date;
 	snapshotTimestamp?: number;
 	metrics?: AgentSnapshot['metrics'];
+}
+
+class ManualChannel implements Channel {
+	readonly adapter = 'telegram';
+	connectCalls = 0;
+	disconnectCalls = 0;
+	readonly id;
+
+	private _connectGate:
+		| {
+				promise: Promise<void>;
+				resolve: () => void;
+		  }
+		| undefined;
+	private _status: ChannelStatus = 'disconnected';
+
+	constructor(id = testChannelId) {
+		this.id = id;
+	}
+
+	get status(): ChannelStatus {
+		return this._status;
+	}
+
+	setStatus(status: ChannelStatus): void {
+		this._status = status;
+	}
+
+	async process(intent: OutboundIntent): Promise<IntentProcessedConfirmation> {
+		return { intentType: intent.type, success: true, timestamp: Date.now() };
+	}
+
+	async fetchMedia(_ref: string): Promise<ReadableStream<Uint8Array>> {
+		return new ReadableStream<Uint8Array>();
+	}
+
+	subscribe(_handler: (event: InboundEvent) => void): Disposable {
+		return () => {};
+	}
+
+	async *events(): AsyncIterable<InboundEvent> {}
+
+	onLifecycle(_handler: (event: ChannelLifecycleEvent) => void): Disposable {
+		return () => {};
+	}
+
+	deferNextConnect(): { resolve: () => void } {
+		let resolve = () => {};
+		const promise = new Promise<void>((complete) => {
+			resolve = complete;
+		});
+		this._connectGate = { promise, resolve };
+		return { resolve };
+	}
+
+	async connect(): Promise<void> {
+		this.connectCalls += 1;
+		this._status = 'connecting';
+		const gate = this._connectGate;
+		this._connectGate = undefined;
+		await gate?.promise;
+		this._status = 'connected';
+	}
+
+	async disconnect(): Promise<void> {
+		this.disconnectCalls += 1;
+		this._status = 'disconnected';
+	}
 }
 
 function createAgentHandle(id: AgentSessionId, options: TestAgentHandleOptions): AgentHandle {
@@ -335,6 +422,7 @@ async function expectRequestError(client: SocketTransportClient, method: string,
 }
 
 describe('CLI commands over a real daemon RPC socket', () => {
+	let channelRegistry: ChannelRegistryImpl;
 	let coordinator: ManualCoordinator;
 	let daemon: Daemon | undefined;
 	let logBuffer: LogBuffer;
@@ -347,6 +435,7 @@ describe('CLI commands over a real daemon RPC socket', () => {
 	beforeEach(async () => {
 		testDirectory = await mkdtemp(join(tmpdir(), 'genii-streaming-rpc-'));
 		socketPath = join(testDirectory, 'daemon.sock');
+		channelRegistry = new ChannelRegistryImpl();
 		coordinator = new ManualCoordinator();
 		logBuffer = createLogBuffer();
 		triggerLogger = createTriggerLogger();
@@ -357,12 +446,31 @@ describe('CLI commands over a real daemon RPC socket', () => {
 			dataPath: testDirectory,
 			guidancePath: join(testDirectory, 'guidance'),
 			coordinator,
+			channelRegistry,
 			logger: triggerLogger.logger,
 			logBuffer,
 			logLevel: 'fatal',
 		});
 		await daemon.start();
 	});
+
+	function registerTestChannel(): ManualChannel {
+		const channel = new ManualChannel();
+		channelRegistry.register(channel);
+		return channel;
+	}
+
+	async function runCliWithExit(args: string[]): Promise<{
+		code: number | null;
+		signal: NodeJS.Signals | null;
+		stderr: string;
+		stdout: string;
+	}> {
+		const running = startCli(socketPath, args);
+		children.push(running);
+		const { code, signal } = await running.exit;
+		return { code, signal, stderr: running.stderr(), stdout: running.stdout() };
+	}
 
 	afterEach(async () => {
 		for (const running of children) {
@@ -477,6 +585,261 @@ describe('CLI commands over a real daemon RPC socket', () => {
 			expect(envelope.data).not.toHaveProperty('metadata');
 			expect(envelope.data).not.toHaveProperty('parentId');
 		}
+	});
+
+	it('shows a registered channel in human and canonical JSON modes', async () => {
+		registerTestChannel();
+
+		const human = await runCli(socketPath, ['channel', 'show', testChannelId]);
+		expect(human.stderr).toBe('');
+		expect(human.stdout).toMatch(/^Channel ID[ \t]+telegram$/m);
+		expect(human.stdout).toMatch(/^Adapter[ \t]+telegram$/m);
+		expect(human.stdout).toMatch(/^Status[ \t]+disconnected$/m);
+		expect(human.stdout).not.toMatch(/Bound Conversations|undefined|Cannot read properties/i);
+
+		const json = await runCli(socketPath, ['--output', 'json', 'channel', 'show', testChannelId]);
+		const envelope = jsonEnvelope<NonNullable<RpcMethodResults['channel.get']>>(json.stdout);
+		expect(json.stderr).toBe('');
+		expect(envelope.ok).toBe(true);
+		expect(envelope.data).toEqual({ id: testChannelId, type: 'telegram', status: 'disconnected' });
+	});
+
+	it('reports a missing channel deliberately in human and JSON modes', async () => {
+		const human = await runCliWithExit(['channel', 'show', 'does-not-exist']);
+		expect(human).toMatchObject({ code: 4, signal: null, stdout: '' });
+		expect(human.stderr).toContain('Channel not found: does-not-exist');
+		expect(human.stderr).not.toMatch(/Cannot read properties|Internal error/i);
+
+		const json = await runCliWithExit(['--output', 'json', 'channel', 'show', 'does-not-exist']);
+		const document = JSON.parse(json.stdout) as CliJsonErrorEnvelope;
+		expect(json).toMatchObject({ code: 4, signal: null, stderr: '' });
+		expect(document).toMatchObject({
+			ok: false,
+			error: { code: 'NOT_FOUND', message: 'Channel not found: does-not-exist' },
+		});
+	});
+
+	it('connects and disconnects a registered channel idempotently', async () => {
+		const channel = registerTestChannel();
+
+		const connected = await runCli(socketPath, ['channel', 'connect', testChannelId]);
+		expect(connected.stderr).toBe('');
+		expect(connected.stdout).toContain(`Channel ${testChannelId} connected successfully`);
+		expect(channel.status).toBe('connected');
+		expect(channel.connectCalls).toBe(1);
+
+		await runCli(socketPath, ['channel', 'connect', testChannelId]);
+		expect(channel.connectCalls).toBe(1);
+
+		const disconnected = await runCli(socketPath, ['channel', 'disconnect', testChannelId]);
+		expect(disconnected.stderr).toBe('');
+		expect(disconnected.stdout).toContain(`Channel ${testChannelId} disconnected successfully`);
+		expect(channel.status).toBe('disconnected');
+		expect(channel.disconnectCalls).toBe(1);
+
+		await runCli(socketPath, ['channel', 'disconnect', testChannelId]);
+		expect(channel.disconnectCalls).toBe(1);
+	});
+
+	it('does not start another connect while connecting or reconnecting', async () => {
+		const channel = registerTestChannel();
+		const client = new SocketTransportClient({ socketPath, reconnect: { enabled: false } }, triggerLogger.logger);
+		clients.push(client);
+		await client.connect();
+
+		channel.setStatus('reconnecting');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(0);
+
+		channel.setStatus('connecting');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(0);
+
+		channel.setStatus('error');
+		await expect(
+			client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect']),
+		).resolves.toEqual({ ok: true });
+		expect(channel.connectCalls).toBe(1);
+		expect(channel.status).toBe('connected');
+	});
+
+	it('serializes concurrent lifecycle requests behind an in-flight connect', async () => {
+		const channel = registerTestChannel();
+		const connectGate = channel.deferNextConnect();
+		const client = new SocketTransportClient({ socketPath, reconnect: { enabled: false } }, triggerLogger.logger);
+		clients.push(client);
+		await client.connect();
+
+		const firstConnect = client.request<RpcMethodResults['channel.connect']>('channel.connect', {
+			id: testChannelId,
+		} satisfies RpcMethods['channel.connect']);
+		await waitFor(() => channel.status === 'connecting', 'deferred channel connect to start');
+
+		let secondConnectSettled = false;
+		const secondConnect = client
+			.request<RpcMethodResults['channel.connect']>('channel.connect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.connect'])
+			.finally(() => {
+				secondConnectSettled = true;
+			});
+		let disconnectSettled = false;
+		const disconnect = client
+			.request<RpcMethodResults['channel.disconnect']>('channel.disconnect', {
+				id: testChannelId,
+			} satisfies RpcMethods['channel.disconnect'])
+			.finally(() => {
+				disconnectSettled = true;
+			});
+
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(secondConnectSettled).toBe(false);
+		expect(disconnectSettled).toBe(false);
+		expect(channel.connectCalls).toBe(1);
+		expect(channel.disconnectCalls).toBe(0);
+
+		connectGate.resolve();
+		await expect(Promise.all([firstConnect, secondConnect, disconnect])).resolves.toEqual([
+			{ ok: true },
+			{ ok: true },
+			{ ok: true },
+		]);
+		expect(channel.connectCalls).toBe(1);
+		expect(channel.disconnectCalls).toBe(1);
+		expect(channel.status).toBe('disconnected');
+	});
+
+	it('reserves every startup connect before handling lifecycle requests', async () => {
+		const startupDirectory = await mkdtemp(join(tmpdir(), 'genii-startup-channel-rpc-'));
+		const startupSocketPath = join(startupDirectory, 'daemon.sock');
+		const startupChannelRegistry = new ChannelRegistryImpl();
+		const blockingChannel = new ManualChannel(createChannelId('startup-blocker'));
+		const startupChannel = new ManualChannel();
+		const blockingConnectGate = blockingChannel.deferNextConnect();
+		const startupConnectGate = startupChannel.deferNextConnect();
+		const startupLogger = createTriggerLogger();
+		startupChannelRegistry.register(blockingChannel);
+		startupChannelRegistry.register(startupChannel);
+
+		const startupDaemon = await createDaemonWithDeps({
+			socketPath: startupSocketPath,
+			dataPath: startupDirectory,
+			guidancePath: join(startupDirectory, 'guidance'),
+			coordinator: new ManualCoordinator(),
+			channelRegistry: startupChannelRegistry,
+			logger: startupLogger.logger,
+			logBuffer: createLogBuffer(),
+			logLevel: 'fatal',
+		});
+		const startupClient = new SocketTransportClient(
+			{ socketPath: startupSocketPath, reconnect: { enabled: false } },
+			startupLogger.logger,
+		);
+		const startPromise = startupDaemon.start();
+		let disconnectPromise: Promise<RpcMethodResults['channel.disconnect']> | undefined;
+
+		try {
+			await waitFor(
+				() => blockingChannel.status === 'connecting' && startupChannel.status === 'connecting',
+				'all startup channel connects to begin',
+			);
+			await startupClient.connect();
+
+			let disconnectSettled = false;
+			disconnectPromise = startupClient
+				.request<RpcMethodResults['channel.disconnect']>('channel.disconnect', {
+					id: testChannelId,
+				} satisfies RpcMethods['channel.disconnect'])
+				.finally(() => {
+					disconnectSettled = true;
+				});
+
+			await expect(startupClient.request<RpcMethodResults['daemon.ping']>('daemon.ping', {})).resolves.toEqual({
+				pong: true,
+			});
+			expect(disconnectSettled).toBe(false);
+			expect(blockingChannel.connectCalls).toBe(1);
+			expect(startupChannel.connectCalls).toBe(1);
+			expect(startupChannel.disconnectCalls).toBe(0);
+
+			blockingConnectGate.resolve();
+			startupConnectGate.resolve();
+			await expect(Promise.all([startPromise, disconnectPromise])).resolves.toEqual([undefined, { ok: true }]);
+			expect(blockingChannel.connectCalls).toBe(1);
+			expect(blockingChannel.status).toBe('connected');
+			expect(startupChannel.connectCalls).toBe(1);
+			expect(startupChannel.disconnectCalls).toBe(1);
+			expect(startupChannel.status).toBe('disconnected');
+			expect(startupDaemon.status.state).toBe('running');
+		} finally {
+			blockingConnectGate.resolve();
+			startupConnectGate.resolve();
+			await Promise.allSettled([startPromise, disconnectPromise ?? Promise.resolve()]);
+			await startupClient.disconnect();
+			if (startupDaemon.status.state === 'running') {
+				await startupDaemon.stop('hard');
+			}
+			await rm(startupDirectory, { recursive: true, force: true });
+		}
+	});
+
+	it('emits one canonical JSON result for connect and disconnect', async () => {
+		const channel = registerTestChannel();
+
+		const connected = await runCli(socketPath, ['--output', 'json', 'channel', 'connect', testChannelId]);
+		expect(connected.stderr).toBe('');
+		expect(jsonEnvelope<RpcMethodResults['channel.connect']>(connected.stdout)).toMatchObject({
+			ok: true,
+			data: { ok: true },
+		});
+		expect(channel.status).toBe('connected');
+
+		const disconnected = await runCli(socketPath, ['--output', 'json', 'channel', 'disconnect', testChannelId]);
+		expect(disconnected.stderr).toBe('');
+		expect(jsonEnvelope<RpcMethodResults['channel.disconnect']>(disconnected.stdout)).toMatchObject({
+			ok: true,
+			data: { ok: true },
+		});
+		expect(channel.status).toBe('disconnected');
+	});
+
+	it.each(['connect', 'disconnect', 'reconnect'] as const)(
+		'emits only a not-found JSON error when channel %s misses',
+		async (command) => {
+			const result = await runCliWithExit(['--output', 'json', 'channel', command, 'does-not-exist']);
+			const document = JSON.parse(result.stdout) as CliJsonErrorEnvelope;
+
+			expect(result).toMatchObject({ code: 4, signal: null, stderr: '' });
+			expect(document).toMatchObject({
+				ok: false,
+				error: { code: 'NOT_FOUND', message: 'Channel not found: does-not-exist' },
+			});
+		},
+	);
+
+	it('returns the canonical not-found RPC code for a missing channel', async () => {
+		const client = new SocketTransportClient({ socketPath, reconnect: { enabled: false } }, triggerLogger.logger);
+		clients.push(client);
+		await client.connect();
+
+		await expect(
+			client.request('channel.connect', {
+				id: createChannelId('does-not-exist'),
+			} satisfies RpcMethods['channel.connect']),
+		).rejects.toMatchObject({
+			code: RpcApplicationErrorCode.NotFound,
+			message: 'Channel not found: does-not-exist',
+		});
 	});
 
 	it('tails only the selected agent across replay, overlap, and live publication', async () => {
