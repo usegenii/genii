@@ -152,6 +152,14 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 	rpcServer: RpcServer;
 	connections: Map<string, TransportConnection>;
 } {
+	let rpcServer: RpcServer | undefined;
+	const stopRpcServer = async (): Promise<void> => {
+		if (!rpcServer) {
+			throw new Error('RPC server is not initialized');
+		}
+		await rpcServer.stop();
+	};
+
 	// Track connections for subscription manager
 	const connections = new Map<string, TransportConnection>();
 
@@ -176,6 +184,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		conversationManager: deps.conversationManager,
 		config: deps.config,
 		shutdownManager: deps.shutdownManager,
+		stopRpcServer,
 		subscriptionManager,
 		logger: deps.logger,
 		modelFactory: deps.modelFactory,
@@ -188,7 +197,7 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 	const handlers = createHandlers(handlerContext);
 
 	// Create and return RPC server
-	const rpcServer = createRpcServer({
+	const createdRpcServer = createRpcServer({
 		transport: deps.transport,
 		handlerContext,
 		handlers,
@@ -197,8 +206,9 @@ function createRpcServerWithDeps(deps: CreateRpcServerDepsConfig): {
 		runtimePublisher,
 		logger: deps.logger,
 	});
+	rpcServer = createdRpcServer;
 
-	return { rpcServer, connections };
+	return { rpcServer: createdRpcServer, connections };
 }
 
 /**
@@ -426,6 +436,8 @@ export async function createDaemon(options: CreateDaemonOptions = {}): Promise<D
  * Extended options for creating a daemon with custom subsystems.
  */
 export interface CreateDaemonWithDepsOptions extends CreateDaemonOptions {
+	/** Custom shutdown manager instance */
+	shutdownManager?: ShutdownManager;
 	/** Custom coordinator instance */
 	coordinator?: Coordinator;
 	/** Custom channel registry instance */
@@ -469,7 +481,7 @@ export async function createDaemonWithDeps(options: CreateDaemonWithDepsOptions 
 	logger.info({ config: { socketPath, dataPath, guidancePath, logLevel } }, 'Creating daemon with deps');
 
 	// Create shutdown manager
-	const shutdownManager = new ShutdownManager(logger);
+	const shutdownManager = options.shutdownManager ?? new ShutdownManager(logger);
 
 	// Create or use provided coordinator with snapshot store
 	const snapshotPath = join(dataPath, 'snapshots');
