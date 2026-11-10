@@ -38,7 +38,7 @@
 		"type": "git",
 		"url": "https://github.com/usegenii/genii"
 	},
-	"packageManager": "pnpm@11.28.10",
+	"packageManager": "pnpm@11.28.11",
 	"dependencies": {
 		"@genii/comms": "workspace:*",
 		"@genii/config": "workspace:*",
