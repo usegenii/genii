@@ -3,10 +3,13 @@
  * @module commands/daemon/stop
  */
 
+import { DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS } from '@genii/lib/rpc/methods';
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
 import { createSpinner } from '../../utils/spinner';
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 interface StopOptions {
 	force?: boolean;
@@ -14,27 +17,31 @@ interface StopOptions {
 }
 
 /**
- * Wait for the daemon to stop responding.
+ * Parse an exact nonnegative integer that Node can use as a timer delay.
  */
-async function waitForDaemonStop(timeoutMs: number): Promise<boolean> {
-	const startTime = Date.now();
-	const pollInterval = 500;
-	const client = createDaemonClient();
-
-	while (Date.now() - startTime < timeoutMs) {
-		try {
-			await client.connect();
-			await client.ping();
-			await client.disconnect();
-			// Still running, wait and try again
-			await new Promise((resolve) => setTimeout(resolve, pollInterval));
-		} catch {
-			// Connection failed, daemon has stopped
-			return true;
-		}
+function parseTimeoutMs(value: string): number {
+	if (!/^\d+$/.test(value)) {
+		throw new Error(`Invalid timeout "${value}": expected an integer from 0 to ${MAX_TIMER_DELAY_MS} milliseconds`);
 	}
 
-	return false;
+	const timeoutMs = Number(value);
+	if (!Number.isSafeInteger(timeoutMs) || timeoutMs > MAX_TIMER_DELAY_MS) {
+		throw new Error(`Invalid timeout "${value}": expected an integer from 0 to ${MAX_TIMER_DELAY_MS} milliseconds`);
+	}
+
+	return timeoutMs;
+}
+
+/**
+ * Check whether connecting failed because no daemon is listening.
+ */
+function isDaemonNotRunning(error: unknown): boolean {
+	if (!(error instanceof Error) || !('code' in error)) {
+		return false;
+	}
+
+	const code = String(error.code);
+	return code === 'ENOENT' || code === 'ECONNREFUSED';
 }
 
 /**
@@ -45,60 +52,85 @@ export function stopCommand(daemon: Command): void {
 		.command('stop')
 		.description('Stop the Genii daemon')
 		.option('-f, --force', 'Force stop without graceful shutdown')
-		.option('--timeout <ms>', 'Timeout for graceful shutdown in milliseconds', '30000')
+		.option(
+			'--timeout <ms>',
+			'Timeout for graceful shutdown in milliseconds',
+			String(DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS),
+		)
 		.action(async (options: StopOptions, cmd: Command) => {
 			const globalOpts = cmd.optsWithGlobals();
 			const format = getOutputFormat(globalOpts);
 			const formatter = getFormatter(format);
-			const timeout = parseInt(options.timeout ?? '30000', 10);
+			let timeoutMs: number;
+			try {
+				timeoutMs = parseTimeoutMs(options.timeout ?? String(DEFAULT_DAEMON_SHUTDOWN_TIMEOUT_MS));
+			} catch (error) {
+				formatter.error(error instanceof Error ? error : new Error(String(error)));
+				process.exitCode = 1;
+				return;
+			}
 
 			const spinner = createSpinner({ text: 'Stopping daemon...' });
-			spinner.start();
+			if (format === 'human') {
+				spinner.start();
+			}
 
 			const client = createDaemonClient();
 
 			try {
 				await client.connect();
-			} catch {
-				spinner.fail('Daemon is not running');
+			} catch (error) {
+				if (!isDaemonNotRunning(error)) {
+					if (format === 'human') {
+						spinner.fail('Failed to stop daemon');
+					}
+					formatter.error(error instanceof Error ? error : new Error(String(error)));
+					process.exitCode = 1;
+					return;
+				}
+
+				if (format === 'human') {
+					spinner.info('Daemon is not running');
+				}
 				if (format === 'json') {
 					formatter.success({ stopped: false, reason: 'not_running' });
+				} else if (format === 'quiet') {
+					formatter.raw('not_running');
 				}
 				return;
 			}
 
 			try {
-				const mode = options.force ? 'hard' : 'graceful';
 				spinner.text = options.force ? 'Force stopping daemon...' : 'Gracefully stopping daemon...';
 
-				// Send shutdown command
-				await client.shutdown(mode, timeout);
+				const result = await client.shutdown({
+					graceful: options.force !== true,
+					timeoutMs,
+				});
 
-				// Disconnect immediately since daemon will be shutting down
+				if (result.ok !== true || (result.termination !== 'graceful' && result.termination !== 'forced')) {
+					throw new Error('Daemon returned an invalid shutdown result');
+				}
+
+				if (format === 'human') {
+					spinner.succeed(`Daemon stopped: ${result.termination} termination`);
+				} else if (format === 'json') {
+					formatter.success({ stopped: true, mode: result.termination });
+				} else {
+					formatter.raw(result.termination);
+				}
+			} catch (error) {
+				if (format === 'human') {
+					spinner.fail('Failed to stop daemon');
+				}
+				formatter.error(error instanceof Error ? error : new Error(String(error)));
+				process.exitCode = 1;
+			} finally {
 				try {
 					await client.disconnect();
 				} catch {
-					// Expected - daemon is shutting down
+					// The daemon may close the socket as it completes shutdown.
 				}
-
-				// Wait for daemon to actually stop
-				spinner.text = 'Waiting for daemon to stop...';
-				const stopped = await waitForDaemonStop(timeout);
-
-				if (stopped) {
-					spinner.succeed('Daemon stopped successfully');
-					if (format === 'json') {
-						formatter.success({ stopped: true, mode });
-					}
-				} else {
-					spinner.fail('Daemon stop timed out');
-					formatter.error('Daemon did not stop within the timeout period');
-					process.exit(1);
-				}
-			} catch (error) {
-				spinner.fail('Failed to stop daemon');
-				formatter.error(error instanceof Error ? error : new Error(String(error)));
-				process.exit(1);
 			}
 		});
 }
