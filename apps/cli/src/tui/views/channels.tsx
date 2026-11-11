@@ -24,7 +24,7 @@ export function Channels(): React.ReactElement {
 		name: ch.id, // Use ID as name since ChannelSummary doesn't have name
 		type: ch.type,
 		status: ch.status,
-		messageCount: ch.conversationCount ?? 0,
+		messageCount: 0,
 	}));
 
 	// Clear status message after 3 seconds
