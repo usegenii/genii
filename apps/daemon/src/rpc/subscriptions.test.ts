@@ -10,6 +10,7 @@ function createConnection(id: string): TransportConnection & { notify: ReturnTyp
 		id,
 		metadata: {},
 		notify: vi.fn<(notification: RpcNotification) => void>(),
+		onResponseSettled: vi.fn(),
 		close: vi.fn(),
 	};
 }

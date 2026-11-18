@@ -128,6 +128,7 @@ export class DaemonImpl implements Daemon {
 
 	private _state: DaemonState = 'stopped';
 	private _startedAt: Date | undefined;
+	private _stopPromise: Promise<void> | undefined;
 
 	constructor(config: DaemonConfig, deps: DaemonDependencies) {
 		this._config = config;
@@ -227,6 +228,12 @@ export class DaemonImpl implements Daemon {
 	 * @param mode - Shutdown mode ('graceful' or 'hard'). Defaults to 'graceful'.
 	 */
 	async stop(mode: ShutdownMode = 'graceful'): Promise<void> {
+		if (this._state === 'stopping' && this._stopPromise) {
+			await this._shutdownManager.execute(mode);
+			await this._stopPromise;
+			return;
+		}
+
 		if (this._state !== 'running') {
 			this._logger.warn({ state: this._state }, 'Cannot stop daemon - not running');
 			return;
@@ -234,12 +241,20 @@ export class DaemonImpl implements Daemon {
 
 		this._state = 'stopping';
 		this._logger.info({ mode }, 'Stopping daemon');
+		this._stopPromise = this._performStop(mode);
+		await this._stopPromise;
+	}
 
+	private async _performStop(mode: ShutdownMode): Promise<void> {
 		try {
-			await this._shutdownManager.execute(mode);
+			const outcome = await this._shutdownManager.execute(mode);
+			await this._rpcServer.stop();
+			if (!outcome.completed) {
+				throw new Error(`Daemon shutdown did not complete: ${outcome.failedHandlers.join(', ')}`);
+			}
 			this._state = 'stopped';
 			this._startedAt = undefined;
-			this._logger.info('Daemon stopped successfully');
+			this._logger.info({ mode: outcome.mode }, 'Daemon stopped successfully');
 		} catch (error) {
 			this._logger.error({ error }, 'Error during daemon shutdown');
 			this._state = 'stopped';
@@ -284,12 +299,12 @@ export class DaemonImpl implements Daemon {
 	 * - 40: Stop conversation manager (persists state)
 	 */
 	private _registerShutdownHandlers(): void {
-		// Priority 0: Stop RPC server (stop accepting new connections/requests)
+		// Priority 0: Stop accepting new work while preserving lifecycle control requests.
 		this._shutdownManager.register(
 			'rpc-server',
 			async () => {
-				this._logger.debug('Stopping RPC server');
-				await this._rpcServer.stop();
+				this._logger.debug('Stopping new RPC work');
+				await this._rpcServer.stopAccepting();
 			},
 			0,
 		);
@@ -341,11 +356,12 @@ export class DaemonImpl implements Daemon {
 		// Priority 30: Shutdown coordinator
 		this._shutdownManager.register(
 			'coordinator',
-			async (mode) => {
+			async (mode, timeoutMs, signal) => {
 				this._logger.debug({ mode }, 'Shutting down coordinator');
 				await this._coordinator.shutdown({
 					graceful: mode === 'graceful',
-					timeoutMs: mode === 'graceful' ? 30000 : 5000,
+					timeoutMs,
+					signal,
 				});
 			},
 			30,

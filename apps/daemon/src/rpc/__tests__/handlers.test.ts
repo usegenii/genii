@@ -155,8 +155,13 @@ function createMockContext(overrides?: Partial<RpcHandlerContext>): RpcHandlerCo
 			version: '1.0.0',
 		} as DaemonRuntimeConfig,
 		shutdownManager: {} as ShutdownManager,
+		stopRpcServer: vi.fn().mockResolvedValue(undefined),
 		subscriptionManager: {} as SubscriptionManager,
-		connection: { id: 'test-connection' } as TransportConnection,
+		requestId: 'test-request',
+		connection: {
+			id: 'test-connection',
+			onResponseSettled: vi.fn(),
+		} as unknown as TransportConnection,
 		logger: createMockLogger(),
 		modelFactory: createMockModelFactory(),
 		appConfig: undefined,
@@ -277,6 +282,73 @@ describe('RPC Handlers', () => {
 					createdAt: matchingHandle.createdAt.toISOString(),
 				},
 			]);
+		});
+	});
+
+	describe('daemon.shutdown', () => {
+		it('returns the actual forced outcome after a graceful timeout', async () => {
+			const execute = vi.fn().mockResolvedValue({
+				mode: 'hard',
+				completed: true,
+				failedHandlers: [],
+			});
+			let settleResponse: (() => void) | undefined;
+			const stopRpcServer = vi.fn().mockResolvedValue(undefined);
+			const context = createMockContext({
+				shutdownManager: { execute } as unknown as ShutdownManager,
+				stopRpcServer,
+				connection: {
+					id: 'shutdown-connection',
+					onResponseSettled: vi.fn((_requestId: string, callback: () => void) => {
+						settleResponse = callback;
+					}),
+				} as unknown as TransportConnection,
+			});
+			const handler = getHandler(createHandlers(context), 'daemon.shutdown');
+
+			await expect(handler({ graceful: true, timeoutMs: 25 }, context)).resolves.toEqual({
+				ok: true,
+				termination: 'forced',
+			});
+			expect(execute).toHaveBeenCalledWith('graceful', 25);
+			expect(context.connection.onResponseSettled).toHaveBeenCalledWith('test-request', expect.any(Function));
+			expect(stopRpcServer).not.toHaveBeenCalled();
+
+			settleResponse?.();
+			expect(stopRpcServer).toHaveBeenCalledOnce();
+		});
+
+		it('returns a server error when forced cleanup does not complete', async () => {
+			const execute = vi.fn().mockResolvedValue({
+				mode: 'hard',
+				completed: false,
+				failedHandlers: ['coordinator'],
+			});
+			const context = createMockContext({
+				shutdownManager: { execute } as unknown as ShutdownManager,
+				connection: {
+					id: 'shutdown-connection',
+					onResponseSettled: vi.fn(),
+				} as unknown as TransportConnection,
+			});
+			const handler = getHandler(createHandlers(context), 'daemon.shutdown');
+
+			await expect(handler({ graceful: false, timeoutMs: 1 }, context)).rejects.toMatchObject({
+				code: -32000,
+				message: 'Daemon shutdown did not complete',
+			});
+			expect(execute).toHaveBeenCalledWith('hard', 1);
+		});
+
+		it('rejects invalid timeout values without starting shutdown', async () => {
+			const execute = vi.fn();
+			const context = createMockContext({
+				shutdownManager: { execute } as unknown as ShutdownManager,
+			});
+			const handler = getHandler(createHandlers(context), 'daemon.shutdown');
+
+			await expect(handler({ timeoutMs: -1 }, context)).rejects.toMatchObject({ code: -32602 });
+			expect(execute).not.toHaveBeenCalled();
 		});
 	});
 

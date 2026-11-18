@@ -39,6 +39,7 @@ class SocketConnection implements TransportConnection {
 	readonly metadata: Record<string, unknown>;
 
 	private readonly _socket: import('node:net').Socket;
+	private readonly _responseSettledCallbacks = new Map<string, Set<() => void>>();
 	private _closed = false;
 
 	constructor(id: string, socket: import('node:net').Socket) {
@@ -58,6 +59,16 @@ class SocketConnection implements TransportConnection {
 		this._socket.write(data);
 	}
 
+	onResponseSettled(requestId: string, callback: () => void): void {
+		if (this._closed) {
+			queueMicrotask(callback);
+			return;
+		}
+		const callbacks = this._responseSettledCallbacks.get(requestId) ?? new Set();
+		callbacks.add(callback);
+		this._responseSettledCallbacks.set(requestId, callbacks);
+	}
+
 	close(): void {
 		if (this._closed) {
 			return;
@@ -71,10 +82,11 @@ class SocketConnection implements TransportConnection {
 	 */
 	sendResponse(response: RpcResponse): void {
 		if (this._closed) {
+			this._settleResponse(response.id);
 			return;
 		}
 		const data = encode(response);
-		this._socket.write(data);
+		this._socket.write(data, () => this._settleResponse(response.id));
 	}
 
 	get socket(): import('node:net').Socket {
@@ -87,6 +99,21 @@ class SocketConnection implements TransportConnection {
 
 	markClosed(): void {
 		this._closed = true;
+		for (const requestId of this._responseSettledCallbacks.keys()) {
+			this._settleResponse(requestId);
+		}
+	}
+
+	private _settleResponse(requestId: string): void {
+		const callbacks = [...(this._responseSettledCallbacks.get(requestId) ?? [])];
+		this._responseSettledCallbacks.delete(requestId);
+		for (const callback of callbacks) {
+			try {
+				callback();
+			} catch {
+				// Response completion must not crash the transport.
+			}
+		}
 	}
 }
 
@@ -101,6 +128,7 @@ export class SocketTransportServer implements TransportServer {
 	private readonly _connections: Map<string, SocketConnection> = new Map();
 
 	private _server: import('node:net').Server | null = null;
+	private _serverClosePromise: Promise<void> | null = null;
 	private _listening = false;
 	private _nextConnectionId = 1;
 
@@ -129,6 +157,7 @@ export class SocketTransportServer implements TransportServer {
 			// Ignore if file doesn't exist
 		}
 
+		this._serverClosePromise = null;
 		this._server = net.createServer((socket) => this._handleConnection(socket));
 
 		return new Promise((resolve, reject) => {
@@ -158,15 +187,32 @@ export class SocketTransportServer implements TransportServer {
 		});
 	}
 
-	/**
-	 * Stop the server and close all connections.
-	 */
-	async close(): Promise<void> {
-		if (!this._listening) {
+	async stopAccepting(): Promise<void> {
+		if (!this._listening || !this._server) {
 			return;
 		}
 
 		this._listening = false;
+		const server = this._server;
+		this._server = null;
+		this._serverClosePromise = new Promise((resolve) => {
+			server.close((error) => {
+				if (error) {
+					this._logger.warn({ error }, 'Error while closing socket listener');
+				}
+				resolve();
+			});
+		});
+
+		await this._removeSocketFile();
+		this._logger.info('Socket server stopped accepting connections');
+	}
+
+	/**
+	 * Stop the server and close all connections.
+	 */
+	async close(): Promise<void> {
+		await this.stopAccepting();
 
 		// Close all connections
 		for (const connection of this._connections.values()) {
@@ -174,23 +220,21 @@ export class SocketTransportServer implements TransportServer {
 		}
 		this._connections.clear();
 
-		// Close server
-		if (this._server) {
-			await new Promise<void>((resolve) => {
-				this._server?.close(() => resolve());
-			});
-			this._server = null;
-		}
+		await this._serverClosePromise;
+		this._serverClosePromise = null;
 
-		// Remove socket file
+		await this._removeSocketFile();
+
+		this._logger.info('Socket server stopped');
+	}
+
+	private async _removeSocketFile(): Promise<void> {
 		try {
 			const fs = await import('node:fs/promises');
 			await fs.unlink(this._config.socketPath);
 		} catch {
-			// Ignore if file doesn't exist
+			// Ignore if file doesn't exist.
 		}
-
-		this._logger.info('Socket server stopped');
 	}
 
 	/**
