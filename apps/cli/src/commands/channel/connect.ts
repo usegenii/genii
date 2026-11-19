@@ -6,6 +6,7 @@
 import type { Command } from 'commander';
 import { createDaemonClient } from '../../client';
 import { getFormatter, getOutputFormat } from '../../output/formatter';
+import { handleError } from '../../utils/errors';
 
 /**
  * Connect a channel.
@@ -33,7 +34,9 @@ export function connectCommand(channel: Command): void {
 					try {
 						const channelDetails = await client.getChannel(channelId);
 						if (channelDetails.status === 'connected') {
-							formatter.message(`Disconnecting channel ${channelId}...`, 'info');
+							if (format === 'human') {
+								formatter.message(`Disconnecting channel ${channelId}...`, 'info');
+							}
 							await client.disconnectChannel(channelId);
 						}
 					} catch {
@@ -41,13 +44,20 @@ export function connectCommand(channel: Command): void {
 					}
 				}
 
-				formatter.message(`Connecting channel ${channelId}...`, 'info');
-				await client.connectChannel(channelId);
+				if (format === 'human') {
+					formatter.message(`Connecting channel ${channelId}...`, 'info');
+				}
+				const result = await client.connectChannel(channelId);
 
-				formatter.message(`Channel ${channelId} connected successfully`, 'success');
+				if (format === 'json') {
+					formatter.success(result);
+				} else if (format === 'human') {
+					formatter.message(`Channel ${channelId} connected successfully`, 'success');
+				}
 			} catch (error) {
+				const { exitCode } = handleError(error);
 				formatter.error(error instanceof Error ? error : new Error(String(error)));
-				process.exitCode = 1;
+				process.exitCode = exitCode;
 			} finally {
 				await client.disconnect();
 			}

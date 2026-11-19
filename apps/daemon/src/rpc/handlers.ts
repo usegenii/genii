@@ -28,12 +28,14 @@ import type {
 import type { ModelFactory } from '@genii/models/factory';
 import type { Coordinator } from '@genii/orchestrator/coordinator/types';
 import type { ToolRegistryInterface } from '@genii/orchestrator/tools/types';
+import { enqueueChannelOperation } from '../channels/lifecycle';
 import type { ConversationManager } from '../conversations/manager';
 import type { Logger } from '../logging/logger';
 import { resolveDefaultModel } from '../models/resolve';
 import { executeOnboard, getOnboardStatus } from '../onboard';
 import type { SchedulerLifecycle } from '../scheduler/types';
 import type { ShutdownManager, ShutdownMode } from '../shutdown/manager';
+import { ResourceNotFoundError } from '../transport/errors';
 import type { TransportConnection } from '../transport/types';
 import type { SubscriptionManager } from './subscriptions';
 
@@ -491,6 +493,27 @@ async function handleChannelList(context: RpcHandlerContext): Promise<ChannelSum
 	}));
 }
 
+function requireRegisteredChannel(channelRegistry: ChannelRegistry, channelId: RpcMethods['channel.get']['id']) {
+	const channel = channelRegistry.get(channelId);
+	if (!channel) {
+		throw new ResourceNotFoundError('Channel', channelId);
+	}
+
+	return channel;
+}
+
+function canConnectRegisteredChannel(status: ChannelDetails['status']): boolean {
+	switch (status) {
+		case 'disconnected':
+		case 'error':
+			return true;
+		case 'connected':
+		case 'connecting':
+		case 'reconnecting':
+			return false;
+	}
+}
+
 async function handleChannelGet(
 	params: RpcMethods['channel.get'],
 	context: RpcHandlerContext,
@@ -513,9 +536,20 @@ async function handleChannelConnect(
 	params: RpcMethods['channel.connect'],
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['channel.connect']> {
-	// This is a stub - full implementation requires channel adapter factory
-	context.logger.info({ type: params.type }, 'Channel connect requested');
-	throw new Error('channel.connect requires channel adapter factory - not implemented in RPC layer');
+	const { channelRegistry, logger } = context;
+	const channel = requireRegisteredChannel(channelRegistry, params.id);
+
+	await enqueueChannelOperation(channel, async () => {
+		if (!canConnectRegisteredChannel(channel.status)) {
+			logger.debug({ channelId: params.id, status: channel.status }, 'Channel connect skipped');
+			return;
+		}
+
+		logger.info({ channelId: params.id }, 'Connecting channel');
+		await channel.connect();
+	});
+
+	return { ok: true };
 }
 
 async function handleChannelDisconnect(
@@ -523,14 +557,17 @@ async function handleChannelDisconnect(
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['channel.disconnect']> {
 	const { channelRegistry, logger } = context;
-	const channel = channelRegistry.get(params.id);
+	const channel = requireRegisteredChannel(channelRegistry, params.id);
 
-	if (!channel) {
-		throw new Error(`Channel not found: ${params.id}`);
-	}
+	await enqueueChannelOperation(channel, async () => {
+		if (channel.status === 'disconnected') {
+			logger.debug({ channelId: params.id }, 'Channel is already disconnected');
+			return;
+		}
 
-	logger.info({ channelId: params.id }, 'Disconnecting channel');
-	await channel.disconnect();
+		logger.info({ channelId: params.id }, 'Disconnecting channel');
+		await channel.disconnect();
+	});
 
 	return { ok: true };
 }
@@ -540,15 +577,15 @@ async function handleChannelReconnect(
 	context: RpcHandlerContext,
 ): Promise<RpcMethodResults['channel.reconnect']> {
 	const { channelRegistry, logger } = context;
-	const channel = channelRegistry.get(params.id);
+	const channel = requireRegisteredChannel(channelRegistry, params.id);
 
-	if (!channel) {
-		throw new Error(`Channel not found: ${params.id}`);
-	}
-
-	logger.info({ channelId: params.id }, 'Reconnecting channel');
-	await channel.disconnect();
-	await channel.connect();
+	await enqueueChannelOperation(channel, async () => {
+		logger.info({ channelId: params.id }, 'Reconnecting channel');
+		if (channel.status !== 'disconnected') {
+			await channel.disconnect();
+		}
+		await channel.connect();
+	});
 
 	return { ok: true };
 }
